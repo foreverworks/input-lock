@@ -6,9 +6,11 @@ checked: a download is hashed with every algorithm asked for, in one pass.
 
 import gzip
 import hashlib
+import http.client
 import lzma
 import urllib.error
 import urllib.request
+import zlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
@@ -22,6 +24,9 @@ TIMEOUT: Final = 120
 """Seconds without a byte before a download is abandoned."""
 
 CHUNK: Final = 1 << 20
+
+ERRORS: Final = (OSError, ValueError, http.client.HTTPException)
+"""What a download or an index read raises when it fails: the CLI reports these per entry."""
 
 
 @dataclass(frozen=True)
@@ -37,18 +42,33 @@ def request(url: str) -> urllib.request.Request:
     return urllib.request.Request(url, headers={"User-Agent": f"input-lock/{__version__}"})
 
 
+def no_downgrade(url: str, final: str) -> None:
+    """Refuse a redirect from https to anything else: the bytes would no longer be the server's."""
+    if url.startswith("https://") and not final.startswith("https://"):
+        raise ValueError(f"{url} redirected to {final}, which is not https")
+
+
 def hashes(url: str, algorithms: Sequence[str]) -> dict[str, str]:
-    """{algorithm: hex} of the file at `url`, hashed with each algorithm in one streaming pass."""
+    """{algorithm: hex} of the file at `url`, hashed with each algorithm in one streaming pass.
+
+    Raises ValueError when fewer bytes arrive than the server announced: a cut download is never hashed."""
     hashers = {algorithm: hashlib.new(algorithm) for algorithm in algorithms}
+    size = 0
     with urllib.request.urlopen(request(url), timeout=TIMEOUT) as response:
+        no_downgrade(url, response.geturl())
+        announced = response.headers.get("Content-Length")
         while chunk := response.read(CHUNK):
+            size += len(chunk)
             for hasher in hashers.values():
                 hasher.update(chunk)
+    if isinstance(announced, str) and announced.isdigit() and int(announced) != size:
+        raise ValueError(f"{url}: {size} bytes arrived of the {announced} announced")
     return {algorithm: hasher.hexdigest() for algorithm, hasher in hashers.items()}
 
 
 def missing(error: urllib.error.URLError, url: str) -> bool:
-    """The server (or the file system) has no such file, as opposed to failing."""
+    """The server (or the file system) has no such file, as opposed to failing. Object stores answer a
+    missing file with 403, so it counts as missing too."""
     if isinstance(error, urllib.error.HTTPError):
         return error.code in (403, 404, 410)
     return url.startswith("file:")
@@ -59,12 +79,16 @@ def read_index(url: str) -> str | None:
     for candidate, unpack in ((url, None), (url + ".gz", gzip.decompress), (url + ".xz", lzma.decompress)):
         try:
             with urllib.request.urlopen(request(candidate), timeout=TIMEOUT) as response:
+                no_downgrade(candidate, response.geturl())
                 body: bytes = response.read()
         except urllib.error.URLError as error:
             if missing(error, candidate):
                 continue
             raise
-        return (unpack(body) if unpack else body).decode("utf-8", "replace")
+        try:
+            return (unpack(body) if unpack else body).decode("utf-8", "replace")
+        except (OSError, EOFError, lzma.LZMAError, zlib.error) as error:
+            raise ValueError(f"{candidate} is not a readable index: {error}") from None
     return None
 
 

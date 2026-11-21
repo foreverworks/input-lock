@@ -158,7 +158,8 @@ Inputs: `lock` (default `lock.json`), `base` (default `origin/<default branch>`)
 interpreter to use instead of installing one), `commit` (`"false"` to only write the file),
 `commit-message`. Output: `changed`, the number of checksums rewritten.
 
-A commit pushed with the workflow's own token does not start other workflows. If your pull
+The Action commits on `push` events only; on any other event it writes the file and warns. A
+commit pushed with the workflow's own token does not start other workflows. If your pull
 request's required checks must run on the checksum commit, give `actions/checkout` a token of a
 GitHub App or a bot account (`with: token: ...`).
 
@@ -189,7 +190,8 @@ with the URL rendered. So:
 
 It is a deny-list by design: a field the library does not know might change what a build makes,
 so it counts, and a forgotten field means one rebuild too many, never a stale artifact.
-`input-lock identity --image builder` prints it for the lock part alone, ready for a cache key.
+`input-lock identity --image builder` prints it for the lock part alone, ready for a cache key
+(add `debian_snapshot` to the key yourself if the job installs from it).
 The full definition is in [docs/format.md](docs/format.md#the-input-identity).
 
 ## Records

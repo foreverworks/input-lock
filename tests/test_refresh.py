@@ -66,6 +66,14 @@ class Refresh(Workspace):
         self.assertEqual(self.cli("refresh", "--entry", "nope")[0], 1)
         self.assertEqual(self.cli("refresh")[0], 1, "refresh needs --base or --entry")
 
+    def test_no_common_ancestor_says_why(self) -> None:
+        self.git("checkout", "-q", "--orphan", "elsewhere")
+        self.commit("unrelated")
+        self.git("checkout", "-q", "main")
+        code, _, err = self.cli("refresh", "--base", "elsewhere")
+        self.assertEqual(code, 1)
+        self.assertIn("fetch-depth: 0", err)
+
     def test_a_lock_new_on_the_branch(self) -> None:
         self.git("checkout", "-qb", "add-lock")
         self.git("rm", "-q", "--cached", "lock.json")

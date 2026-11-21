@@ -75,6 +75,11 @@ class Schema(unittest.TestCase):
         with self.assertRaises(LockError):
             parse("{")
 
+    def test_a_repeated_key_is_refused(self) -> None:
+        with self.assertRaises(LockError) as caught:
+            parse('{"inputs": {"jq": {}, "jq": {}}}')
+        self.assertIn("'jq' appears twice", str(caught.exception))
+
 
 class Checks(unittest.TestCase):
     def entry(self, **fields: object) -> dict[str, object]:
@@ -123,6 +128,9 @@ class Checks(unittest.TestCase):
             },
             "names its suite and components": {
                 "tool": self.entry(datasource="deb", depName="tool", registryUrl="https://e.com/debian")
+            },
+            "registryUrl is not https": {
+                "tool": self.entry(datasource="deb", depName="tool", registryUrl="http://e.com?suite=s&components=main")
             },
         }
         for words, inputs in cases.items():

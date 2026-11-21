@@ -1,7 +1,7 @@
 name: input-lock checksums
 description: >-
-  On a Renovate branch, rewrite the checksum of every lock entry whose version moved (from the
-  download, or from the vendor's Packages index for a .deb) and commit it to the same branch.
+  On a push to a Renovate branch, rewrite the checksum of every lock entry whose version moved
+  (from the download, or from the vendor's Packages index for a .deb) and commit it to that branch.
 author: foreverworks
 branding:
   icon: lock
@@ -22,7 +22,9 @@ inputs:
       changing the job's own Python.
     default: ""
   commit:
-    description: Commit and push the new checksums to the branch ("true"), or only write them ("false").
+    description: >-
+      Commit and push the new checksums to the branch ("true"; on push events only), or only
+      write them ("false").
     default: "true"
   commit-message:
     description: The commit's subject line. Its body lists every checksum rewritten.
@@ -70,8 +72,13 @@ runs:
       env:
         LOCK: ${{ inputs.lock }}
         SUBJECT: ${{ inputs.commit-message }}
+        EVENT: ${{ github.event_name }}
       run: |
         set -euo pipefail
+        if [ "$EVENT" != push ]; then
+          echo "::warning::input-lock commits only on push events (this is $EVENT): the checksums are written, not committed"
+          exit 0
+        fi
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git add -- "$LOCK"

@@ -59,6 +59,12 @@ class Cli(unittest.TestCase):
             run("identity", "--entry", "shellcheck", "--entry", "jq", "--lock", EXAMPLE).stdout,
         )
 
+    def test_refresh_needs_a_file_and_identity_one_selection(self) -> None:
+        refused = run("refresh", "--entry", "jq", "--lock", "-", stdin=EXAMPLE_TEXT)
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("give it a file", refused.stderr)
+        self.assertEqual(run("identity", "--image", "builder", "--entry", "jq", "--lock", EXAMPLE).returncode, 2)
+
     def test_a_future_schema(self) -> None:
         done = run("check", "--lock", "-", stdin='{"schema": 2, "inputs": {}}')
         self.assertEqual(done.returncode, 1)
@@ -101,6 +107,7 @@ class Shell(Workspace):
         done = self.bash("lock_fetch tool got.bin")
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("is not the file the lock pins", done.stderr)
+        self.assertEqual(sorted(p.name for p in self.root.glob("got.bin*")), [], "an unverified file was left behind")
 
     def test_an_unknown_entry_fails_naming_it(self) -> None:
         done = self.bash("lock_var nobody url")

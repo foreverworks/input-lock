@@ -27,30 +27,35 @@ lock_var() {
 lock_fetch() {
   local entry=$1 file=$2 url algorithm key sum checked=0
   url=$(lock_var "$entry" url) || return 1
-  curl -fsSL --retry 3 --connect-timeout 15 --max-time 3600 "$url" -o "$file" || { echo "lock: ${entry}: could not download ${url}" >&2; return 1; }
+  # Into <file>.part first: a file that fails its checksum never lands where the build looks for it.
+  curl -fsSL --proto-redir '=https' --retry 3 --connect-timeout 15 --max-time 3600 "$url" -o "${file}.part" \
+    || { rm -f "${file}.part"; echo "lock: ${entry}: could not download ${url}" >&2; return 1; }
   for algorithm in sha256 sha512 sha1; do
     key=$(lock_key "$entry" "$algorithm")
     sum=${!key:-}
     [ -n "$sum" ] || continue
-    echo "${sum}  ${file}" | "${algorithm}sum" -c --quiet - || { echo "lock: ${entry} (${url}) is not the file the lock pins" >&2; return 1; }
+    echo "${sum}  ${file}.part" | "${algorithm}sum" -c --quiet - \
+      || { rm -f "${file}.part"; echo "lock: ${entry} (${url}) is not the file the lock pins" >&2; return 1; }
     checked=1
   done
-  [ "$checked" = 1 ] || { echo "lock: ${entry} has no checksum in build.env" >&2; return 1; }
+  [ "$checked" = 1 ] || { rm -f "${file}.part"; echo "lock: ${entry} has no checksum in build.env" >&2; return 1; }
+  mv -f "${file}.part" "$file"
 }
 
-lock_debs() {
-  local dir entry files=() package version have
-  dir=$(mktemp -d "${TMPDIR:-/tmp}/lock-debs.XXXXXX")
+lock_debs() (
+  # A subshell, so its trap removes the downloads however it ends.
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/lock-debs.XXXXXX") || exit 1
+  trap 'rm -rf "$dir"' EXIT
+  files=()
   for entry in "$@"; do
-    package=$(lock_var "$entry" apt) || return 1
-    lock_fetch "$entry" "${dir}/${package}.deb" || return 1
+    package=$(lock_var "$entry" apt) || exit 1
+    lock_fetch "$entry" "${dir}/${package}.deb" || exit 1
     files+=("${dir}/${package}.deb")
   done
-  apt-get -y install --no-install-recommends "${files[@]}" || return 1
+  apt-get -y install --no-install-recommends "${files[@]}" || exit 1
   for entry in "$@"; do
-    package=$(lock_var "$entry" apt) && version=$(lock_var "$entry" version) || return 1
+    package=$(lock_var "$entry" apt) && version=$(lock_var "$entry" version) || exit 1
     have=$(dpkg-query -W -f='${Version}' "$package")
-    [ "$have" = "$version" ] || { echo "lock: ${package} is ${have}, the lock pins ${version}" >&2; return 1; }
+    [ "$have" = "$version" ] || { echo "lock: ${package} is ${have}, the lock pins ${version}" >&2; exit 1; }
   done
-  rm -rf "$dir"
-}
+)

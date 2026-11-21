@@ -128,13 +128,12 @@ type Predicate = Provenance | SpdxDocument | TestResult
 
 
 class Statement(TypedDict):
+    """An in-toto Statement v1."""
+
     _type: str
     subject: list[ResourceDescriptor]
     predicateType: str
     predicate: Predicate
-
-
-"""An in-toto Statement v1."""
 
 
 class Signature(TypedDict):

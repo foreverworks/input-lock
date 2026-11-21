@@ -81,10 +81,20 @@ def loads(text: str) -> JsonValue:
     if not text.strip():
         return {"inputs": {}}
     try:
-        value: JsonValue = json.loads(text)
+        value: JsonValue = json.loads(text, object_pairs_hook=unique_keys)
     except json.JSONDecodeError as error:
         raise LockError(f"not JSON: {error}") from None
     return value
+
+
+def unique_keys(pairs: list[tuple[str, JsonValue]]) -> dict[str, JsonValue]:
+    """A JSON object, refusing a key it repeats: JSON keeps the last silently, which would drop an entry."""
+    seen: dict[str, JsonValue] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise LockError(f"{key!r} appears twice in one object")
+        seen[key] = value
+    return seen
 
 
 def parse(text: str, images: Iterable[str] | None = None) -> Lock:
@@ -337,6 +347,8 @@ def renovate_problems(where: str, entry: Entry) -> list[str]:
     if ("datasource" in entry) != ("depName" in entry):
         found.append(f"{where}: datasource and depName come together")
     if entry.get("datasource") == "deb":
+        if not text(entry, "registryUrl").startswith(URL_SCHEMES):
+            found.append(f"{where}: registryUrl is not https (its index is where the checksum comes from)")
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(text(entry, "registryUrl")).query)
         if not {"suite", "components"} <= set(query):
             found.append(

@@ -33,7 +33,8 @@ def file_at(rev: str, path: str) -> str:
     where = Path(path).resolve()
     base = git(["merge-base", rev, "HEAD"], where.parent)
     if base.returncode != 0:
-        raise LockError(f"git merge-base {rev} HEAD: {base.stderr.strip()}")
+        why = base.stderr.strip() or "no common ancestor (a shallow checkout? check out with fetch-depth: 0)"
+        raise LockError(f"git merge-base {rev} HEAD: {why}")
     shown = git(["show", f"{base.stdout.strip()}:./{where.name}"], where.parent)
     return shown.stdout if shown.returncode == 0 else ""
 
@@ -107,7 +108,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     for name, entry in selected(lock, None, args.entry).items():
         try:
             findings = fetch.verify(name, entry)
-        except (OSError, ValueError) as error:  # report every entry, not just the first that fails
+        except fetch.ERRORS as error:  # report every entry, not just the first that fails
             findings = [fetch.Finding("error", name, str(error))]
         for finding in findings:
             bad += finding.level in ("mismatch", "error")
@@ -116,6 +117,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 
 def cmd_refresh(args: argparse.Namespace) -> int:
+    if args.lock == "-":
+        raise LockError("refresh rewrites the lock in place: give it a file, not '-'")
     lock = read_lock(args.lock)
     if args.entry:
         names = sorted(selected(lock, None, args.entry))
@@ -129,7 +132,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     for name in names:
         try:
             computed[name], sources[name] = fetch.checksums_for(lock["inputs"][name])
-        except (OSError, ValueError) as error:
+        except fetch.ERRORS as error:
             print(f"error    {name}: {error}", file=sys.stderr)
             failed += 1
     if failed:
@@ -185,9 +188,14 @@ def parser() -> argparse.ArgumentParser:
     env.add_argument("--image", help="only the entries whose used_by lists this image")
     env.set_defaults(run=cmd_env)
 
-    identity = command("identity", "print the input identity of the lock's entries (all, an image's, or named)")
-    identity.add_argument("--image", help="the entries whose used_by lists this image")
-    identity.add_argument("--entry", action="append", default=[], help="an entry (repeat)")
+    identity = command(
+        "identity",
+        "print the input identity of lock entries alone (all, an image's, or named): no packages, no "
+        "debian_snapshot; add those to a cache key yourself when the job installs from the snapshot",
+    )
+    which = identity.add_mutually_exclusive_group()
+    which.add_argument("--image", help="the entries whose used_by lists this image")
+    which.add_argument("--entry", action="append", default=[], help="an entry (repeat)")
     identity.set_defaults(run=cmd_identity)
 
     verify = command("verify", "download every entry (or the named ones) and compare its checksums")
@@ -212,7 +220,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for line in str(error).splitlines():
             print(f"{getattr(args, 'lock', DEFAULT_LOCK)}: {line}", file=sys.stderr)
         return 1
-    except (OSError, ValueError) as error:
+    except fetch.ERRORS as error:
         print(f"input-lock: {error}", file=sys.stderr)
         return 1
     return code

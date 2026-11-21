@@ -34,7 +34,8 @@ is sorted keys, two-space indent, UTF-8 and a trailing newline, so a diff shows 
 | `debian_snapshot` | no | A [snapshot.debian.org](https://snapshot.debian.org) ID (`YYYYMMDDTHHMMSSZ`) for builds that install Debian packages from a fixed point in time. Exported as `LOCK_DEBIAN_SNAPSHOT`. |
 | `inputs` | yes | One entry per downloaded file, keyed by its name: lowercase letters, digits and dashes. |
 
-Any other top-level field is an error, so a typo never passes silently.
+Any other top-level field is an error, so a typo never passes silently, and so is a key that
+appears twice in one object (JSON would keep the last one and drop an entry without a word).
 
 ## An entry
 
@@ -45,7 +46,7 @@ Any other top-level field is an error, so a typo never passes silently.
 | `sha256`, `sha512`, `sha1` | at least one | Lowercase hex checksums of that download. `refresh` adds a `sha256` to any entry it touches that lacks one (some vendors publish only sha1). |
 | `datasource`, `depName` | together, or neither | Renovate's lookup: where new versions come from. An entry without a datasource is not Renovate's and is moved by hand. |
 | `packageName`, `extractVersion`, `versioning`, `registryUrl` | no | The rest of Renovate's lookup, passed to it as they are. |
-| `apt` | no | For a `.deb` from a vendor's apt repository: its package name. Requires `datasource: deb`, a `registryUrl` naming `suite` and `components`, a `sha256`, and a `url` ending in `.deb`. One entry per package name. |
+| `apt` | no | For a `.deb` from a vendor's apt repository: its package name. Requires `datasource: deb`, an `https://` `registryUrl` naming `suite` and `components`, a `sha256`, and a `url` ending in `.deb`. One entry per package name. |
 | `module` | no | A name for what installs this input in your build, or `null`. Any name: your own checks decide which are valid. |
 | `used_by` | no | A sorted list of distinct names: the images, jobs or machines that install this input. `check --image <name>` (repeated) restricts the names. |
 | `description` | no | A note for people. JSON has no comments; this is where one goes. |
@@ -135,7 +136,9 @@ input_identity(packages, entries, recipe_digest, parent_identity) = sha256(canon
 
 Canonical JSON is sorted keys, no whitespace, UTF-8. `input-lock identity [--image <name>]`
 prints it for lock entries alone (no packages, recipe or parent): a cache key that moves exactly
-when a download a job uses moves.
+when a download a job uses moves. It leaves `debian_snapshot` out, as the full identity does (a
+new snapshot that changes no installed package rebuilds nothing); a job that installs from the
+snapshot without listing its packages should add the snapshot to its cache key itself.
 
 **Which fields count.** `build_fields`, the same projection build.env exports:
 
