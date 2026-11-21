@@ -7,6 +7,9 @@ to the same branch; your build downloads exactly what the lock says and nothing 
 digest, the input identity, tells you whether anything a build reads has changed, so you rebuild
 only when it has.
 
+For teams that build images or CI environments from tarballs, binaries and vendor `.deb`s that no
+package manager pins for them.
+
 Python standard library only. Typed. MIT.
 
 ## The problem
@@ -22,6 +25,17 @@ shell script, a checksum in a YAML file three directories away. Then:
 - **Nobody can say what a build really used.** Which exact files went into last Tuesday's image?
   Did this rebuild change anything, or did it just run again? Without one record of the inputs,
   the answer is archaeology.
+
+## Why not just Renovate regex managers plus a script?
+
+You can: a regex manager moves a version, and a script of yours recomputes the checksum. Then the
+version sits in one file, the URL in another and the checksum behind a script you now maintain,
+test and keep in step with every new kind of download. input-lock is that script, written once:
+one entry holds the version, the URL built from it and the checksums, so they cannot disagree;
+the Action recomputes them on Renovate's branch (for a `.deb`, from the vendor's index, without
+the download); `check` and `verify` refuse a lock that is malformed or no longer matches what it
+downloads; and the input identity gives you a cache key for free. If you pin one or two files, a
+regex manager and a three-line script are enough.
 
 ## What you get
 
@@ -52,12 +66,12 @@ python3 input-lock-0.1.0.pyz --version
 or `pip install git+https://github.com/foreverworks/input-lock@v0.1.0`, which installs the
 `input-lock` command and the `input_lock` library.
 
-**2. Write a lock.** This one is real ([examples/lock.json](examples/lock.json)): jq and
-ShellCheck from their GitHub releases, and Grafana Alloy from Grafana's apt repository.
+**2. Write a lock.** Save this as `lock.json` ([examples/lock.json](examples/lock.json)): jq and
+ShellCheck from their GitHub releases, and Grafana Alloy from Grafana's apt repository. It is
+exactly what `input-lock format` writes, so keep it that way: `refresh` refuses a lock that is not.
 
 ```json
 {
-  "schema": 1,
   "inputs": {
     "alloy": {
       "apt": "alloy",
@@ -66,7 +80,9 @@ ShellCheck from their GitHub releases, and Grafana Alloy from Grafana's apt repo
       "registryUrl": "https://apt.grafana.com?suite=stable&components=main&binaryArch=amd64",
       "sha256": "29ca37327c02e30ff7cc3a1e0ff3779217f26092a1adc29ff4738f6a9e4370e3",
       "url": "https://apt.grafana.com/pool/main/a/alloy/alloy-{version}.amd64.deb",
-      "used_by": ["runner"],
+      "used_by": [
+        "runner"
+      ],
       "version": "1.22.0-1"
     },
     "jq": {
@@ -75,7 +91,10 @@ ShellCheck from their GitHub releases, and Grafana Alloy from Grafana's apt repo
       "extractVersion": "^jq-(?<version>.+)$",
       "sha256": "b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f",
       "url": "https://github.com/jqlang/jq/releases/download/jq-{version}/jq-linux-amd64",
-      "used_by": ["builder", "runner"],
+      "used_by": [
+        "builder",
+        "runner"
+      ],
       "version": "1.8.2"
     },
     "shellcheck": {
@@ -85,10 +104,13 @@ ShellCheck from their GitHub releases, and Grafana Alloy from Grafana's apt repo
       "sha256": "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198",
       "sha512": "25df28923d7d89cfdb9fa8aeef762a887f2bd4ebfbcd43ae71068c60e9458d66250b0f8d6fd66b4bc03723e6cdd47983c547e3ab4f3ea2cbc4bc4028842cc7b9",
       "url": "https://github.com/koalaman/shellcheck/releases/download/v{version}/shellcheck-v{version}.linux.x86_64.tar.xz",
-      "used_by": ["builder"],
+      "used_by": [
+        "builder"
+      ],
       "version": "0.11.0"
     }
-  }
+  },
+  "schema": 1
 }
 ```
 
@@ -143,6 +165,7 @@ permissions:
 jobs:
   checksums:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,6 +176,9 @@ jobs:
 A few minutes after Renovate's push, a second commit on the branch carries the new checksums,
 with a line per checksum saying where it came from. The preset tells Renovate to ignore that
 commit's author, so Renovate keeps rebasing the branch; a rebase runs the Action again.
+
+The lock must already be in its own form (`input-lock format`): the Action, like `refresh`, fails
+on one that is not, so the checksum commit changes checksums and nothing else.
 
 Inputs: `lock` (default `lock.json`), `base` (default `origin/<default branch>`), `python` (an
 interpreter to use instead of installing one), `commit` (`"false"` to only write the file),
@@ -220,18 +246,25 @@ Commands (`--lock <file>` on each, default `lock.json`, `-` for stdin):
 | `sh` | print `lock.sh`, the shell helpers |
 | `identity [--image NAME \| --entry NAME...]` | print the input identity of those entries |
 | `verify [--entry NAME]...` | download and compare every checksum |
-| `refresh --base REF \| --entry NAME...` | rewrite the checksums of moved (or named) entries |
+| `refresh --base REF \| --entry NAME...` | rewrite the checksums of moved (or named) entries; refuses a lock not in its own form |
 
 ## Status
 
 Version 0.1.0, the first release. The lock format is schema 1 and is meant to stay readable by
 every later release; a lock from a newer schema fails with a clear message instead of a guess.
-The library and commands may still change before 1.0, and the changelog will say how.
+The library and commands may still change before 1.0, and the release notes on GitHub will say how.
 
-Known limits: a vendor's `Packages` index is trusted over HTTPS, not checked against the vendor's
-signing key; one entry pins one file for one architecture (several architectures per entry would
-be schema 2). Every push runs the tests on the newest stable Python and checks types and lint against 3.13,
-the oldest supported (Debian 13's); every supported version runs weekly and before each release.
+Known limits:
+
+- **The checksum is trust on first use.** For an entry that is not an apt one, the checksum is the
+  hash of whatever its URL serves when the version is bumped. Nothing is cross-checked against a
+  checksum the upstream publishes, so review the checksum commit as you would any new dependency
+  (the release, its notes, its signature if it has one), not as a proof.
+- A vendor's `Packages` index (an apt entry's checksum) is trusted over HTTPS, not checked against
+  the vendor's signing key.
+- One entry pins one file for one architecture (several architectures per entry would be schema 2).
+- Every push runs the tests on the newest stable Python and checks types and lint against 3.13,
+  the oldest supported (Debian 13's); every supported version runs weekly and before each release.
 
 ## License
 

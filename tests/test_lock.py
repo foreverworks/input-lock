@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 import shlex
 import unittest
 
@@ -40,6 +41,12 @@ class TheExample(unittest.TestCase):
     def test_is_well_formed_and_in_its_own_form(self) -> None:
         self.assertEqual(problems(loads(EXAMPLE_TEXT)), [])
         self.assertEqual(dump(example()), EXAMPLE_TEXT)
+
+    def test_the_readme_shows_it_verbatim(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        first = re.search(r"```json\n(.*?)```", readme, re.DOTALL)
+        assert first is not None
+        self.assertEqual(first.group(1), EXAMPLE_TEXT, "the README's lock is not examples/lock.json")
 
     def test_urls_render(self) -> None:
         lock = example()
@@ -120,17 +127,24 @@ class Checks(unittest.TestCase):
             "must be a string (a field of your own": {"tool": self.entry(build=7)},
             "placeholder the version derives": {"tool": self.entry(major="3")},
             "depName must be a string": {"tool": self.entry(datasource="npm", depName=["x"])},
-            "an apt entry has datasource deb": {"tool": self.entry(apt="tool", url="https://e.com/{version}.deb")},
+            "an apt entry has datasource deb": {
+                "tool": self.entry(apt="tool", url="https://example.com/{version}.deb")
+            },
             "an apt entry's url is the .deb": {
                 "tool": self.entry(
-                    apt="tool", datasource="deb", depName="tool", registryUrl="https://e.com?suite=s&components=main"
+                    apt="tool",
+                    datasource="deb",
+                    depName="tool",
+                    registryUrl="https://example.com?suite=s&components=main",
                 )
             },
             "names its suite and components": {
-                "tool": self.entry(datasource="deb", depName="tool", registryUrl="https://e.com/debian")
+                "tool": self.entry(datasource="deb", depName="tool", registryUrl="https://example.com/debian")
             },
             "registryUrl is not https": {
-                "tool": self.entry(datasource="deb", depName="tool", registryUrl="http://e.com?suite=s&components=main")
+                "tool": self.entry(
+                    datasource="deb", depName="tool", registryUrl="http://example.com?suite=s&components=main"
+                )
             },
         }
         for words, inputs in cases.items():
@@ -148,8 +162,8 @@ class Checks(unittest.TestCase):
             "apt": "pkg",
             "datasource": "deb",
             "depName": "pkg",
-            "registryUrl": "https://e.com?suite=s&components=main",
-            "url": "https://e.com/pkg_{version}.deb",
+            "registryUrl": "https://example.com?suite=s&components=main",
+            "url": "https://example.com/pkg_{version}.deb",
         }
         self.assertIn("also inputs.one", found(self.lock(one=self.entry(**deb), two=self.entry(**deb))))
 
@@ -163,17 +177,17 @@ class Checks(unittest.TestCase):
 
 class Urls(unittest.TestCase):
     def test_placeholders(self) -> None:
-        entry = {"version": "5:29.1.0+dfsg-1", "url": "https://e.com/{build}", "build": "b7"}
+        entry = {"version": "5:29.1.0+dfsg-1", "url": "https://example.com/{build}", "build": "b7"}
         values = placeholders(entry)
         self.assertEqual(values["version_noepoch"], "29.1.0+dfsg-1")
         self.assertEqual(values["version_underscore"], "5:29.1.0_dfsg-1")
         self.assertEqual(values["version_urlquoted"], "5%3A29.1.0%2Bdfsg-1")
         self.assertEqual(values["major"], "29")
-        self.assertEqual(render_url(entry), "https://e.com/b7")
+        self.assertEqual(render_url(entry), "https://example.com/b7")
 
     def test_a_missing_placeholder_is_refused(self) -> None:
         with self.assertRaises(ValueError):
-            render_url({"version": "1", "url": "https://e.com/{nope}"})
+            render_url({"version": "1", "url": "https://example.com/{nope}"})
 
 
 class BuildFields(unittest.TestCase):
@@ -190,7 +204,7 @@ class BuildFields(unittest.TestCase):
         )
 
     def test_unknown_and_module_fields_stay_in(self) -> None:
-        entry = {"version": "1", "url": "https://e.com/{version}", "sha1": "b" * 40, "module": "x", "sdk": "p;1"}
+        entry = {"version": "1", "url": "https://example.com/{version}", "sha1": "b" * 40, "module": "x", "sdk": "p;1"}
         self.assertEqual(set(build_fields(entry)), {"version", "url", "sha1", "module", "sdk"})
 
 

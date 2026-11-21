@@ -8,6 +8,8 @@ build reads from it, and how the input identity is computed. The README has the 
 JSON, written by tools (Renovate, `input-lock refresh`) and read by people in review. Its own form
 is sorted keys, two-space indent, UTF-8 and a trailing newline, so a diff shows only what moved.
 `input-lock format` writes that form; `input-lock format --check` fails when a file is not in it.
+`refresh` (and so the Action) refuses a lock that is not in its form, so the commit that carries new
+checksums changes checksums and nothing else.
 
 ```json
 {
@@ -88,8 +90,18 @@ Renovate's `deb` datasource finds new versions in the repository `registryUrl` n
 `refresh` reads that repository's `Packages` index (`dists/<suite>/<component>/binary-<arch>/`,
 plain, `.gz` or `.xz`) and takes the checksum it publishes for the new version, without
 downloading the package; it checks that the index's file name is the one the URL downloads. An
-index that does not list the version fails the run. The index is read over HTTPS and is not
-signature-checked: the vendor's TLS is the trust here.
+index that does not list the version, or lists a checksum that is not a hex digest, fails the run.
+The index is read over HTTPS and is not signature-checked: the vendor's TLS is the trust here.
+
+### What a checksum vouches for
+
+For an entry that is not an apt one, `refresh` downloads the file the new version's URL names and
+writes the hash of what it received. Nothing is cross-checked against a checksum the upstream
+publishes (a `SHA256SUMS` file, a signature, an attestation), so the checksum proves only that a
+later download is the same bytes as the one taken at bump time. A reviewer treats the checksum
+commit as trust on first use: the bump itself (the release, its notes, its signature if it has
+one) is what gets reviewed, and the checksum commit adds nothing to it. An apt entry has one more
+source: its sha256 is the one the vendor publishes in its index, not a hash of a download.
 
 ## Rules between entries
 
