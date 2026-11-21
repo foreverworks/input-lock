@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=84.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "input-lock"
+dynamic = ["version"]
+description = "One lock file for every external download a build uses: versions, URLs, checksums, and an input identity."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dependencies = []
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development :: Build Tools",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/foreverworks/input-lock"
+
+[project.scripts]
+input-lock = "input_lock.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "input_lock.__version__" }
+
+[tool.setuptools.package-data]
+input_lock = ["py.typed", "lock.sh"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+disallow_any_explicit = true
+files = ["src", "tests", "bin/input-lock"]
+mypy_path = "src"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "N"]
+ignore = ["N815"]  # JSON field names (externalParameters, depName) are the formats' own
+
+[tool.ruff.lint.per-file-ignores]
+"src/input_lock/records.py" = ["N815"]
