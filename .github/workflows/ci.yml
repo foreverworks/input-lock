@@ -1,12 +1,14 @@
 # Every push to main and every pull request: one job on the newest stable Python, with the static
-# checks run against the oldest supported one (3.13). The full matrix runs weekly and gates a release.
-# Nothing runs while the repository is private.
+# checks run against the oldest supported one (3.13). The full matrix runs weekly and gates a release,
+# and so does this job: release.yml calls it. Nothing runs while the repository is private.
 name: ci
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -83,5 +85,6 @@ jobs:
         with:
           node-version: "26"
 
-      - name: The Renovate preset
-        run: npx --yes --package renovate@44.257.8 -- renovate-config-validator --strict default.json
+      - name: The Renovate preset and this repository's own Renovate config
+        run: |
+          npx --yes --package renovate@44.257.8 -- sh -c 'renovate-config-validator --strict default.json && renovate-config-validator --strict'

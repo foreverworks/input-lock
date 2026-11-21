@@ -1,5 +1,6 @@
-# A tag vX.Y.Z publishes input-lock-X.Y.Z.pyz and its .sha256 as a GitHub release, once the test
-# suite passed on every supported Python. The asset is reproducible: scripts/build-pyz.
+# A tag vX.Y.Z on a commit of main publishes input-lock-X.Y.Z.pyz and its .sha256 as a GitHub
+# release, once the test suite passed on every supported Python and the lint, type and Action checks
+# of ci.yml passed too. The asset is reproducible: scripts/build-pyz.
 name: release
 
 on:
@@ -14,9 +15,13 @@ jobs:
     if: ${{ !github.event.repository.private }}
     uses: ./.github/workflows/supported.yml
 
+  checks:
+    if: ${{ !github.event.repository.private }}
+    uses: ./.github/workflows/ci.yml
+
   publish:
     name: publish the release
-    needs: supported
+    needs: [supported, checks]
     if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -25,7 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # the whole history, to tell whether the tagged commit is on main
           persist-credentials: false
+
+      - name: The tagged commit is on main
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "$GITHUB_REF_NAME ($GITHUB_SHA) is not on main" >&2; exit 1; }
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
