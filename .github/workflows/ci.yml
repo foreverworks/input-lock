@@ -1,0 +1,87 @@
+# Every push to main and every pull request: one job on the newest stable Python, with the static
+# checks run against the oldest supported one (3.13). The full matrix runs weekly and gates a release.
+# Nothing runs while the repository is private.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: tests on Python 3.15, types and lint at the 3.13 floor
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15"
+
+      - name: Lint and type tools, pinned
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Lint, at the 3.13 floor (pyproject.toml target-version)
+        run: |
+          ruff check
+          ruff format --check
+
+      - name: Types, at the 3.13 floor
+        run: mypy --strict --python-version 3.13
+
+      - name: Shell
+        run: shellcheck src/input_lock/lock.sh scripts/build-pyz
+
+      - name: Tests
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: The release asset builds and runs
+        run: |
+          scripts/build-pyz
+          python3 dist/input-lock-*.pyz check --lock examples/lock.json
+
+      - name: A real bump for the Action (jq 1.8.2 back to 1.8.1)
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/fixture"
+          git init -q -b main "$fixture"
+          cp examples/lock.json "$fixture/lock.json"
+          git -C "$fixture" add lock.json
+          git -C "$fixture" -c user.name=ci -c user.email=ci@example.com commit -qm base
+          sed -i 's/"version": "1.8.2"/"version": "1.8.1"/' "$fixture/lock.json"
+
+      - name: The Action, from this checkout
+        id: action
+        uses: ./
+        with:
+          lock: ${{ runner.temp }}/fixture/lock.json
+          base: main
+          commit: "false"
+
+      - name: It rewrote jq's checksum, and only that
+        env:
+          CHANGED: ${{ steps.action.outputs.changed }}
+        run: |
+          set -euo pipefail
+          test "$CHANGED" = 1
+          want=$(curl -fsSL https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64 | sha256sum | cut -d' ' -f1)
+          test "$(python3 -I bin/input-lock get jq sha256 --lock "$RUNNER_TEMP/fixture/lock.json")" = "$want"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - name: The Renovate preset
+        run: npx --yes --package renovate@44.257.8 -- renovate-config-validator --strict default.json
