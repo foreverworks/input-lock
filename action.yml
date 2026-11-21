@@ -1,0 +1,79 @@
+name: input-lock checksums
+description: >-
+  On a Renovate branch, rewrite the checksum of every lock entry whose version moved (from the
+  download, or from the vendor's Packages index for a .deb) and commit it to the same branch.
+author: foreverworks
+branding:
+  icon: lock
+  color: gray-dark
+
+inputs:
+  lock:
+    description: The lock file, relative to the repository root.
+    default: lock.json
+  base:
+    description: >-
+      The branch the bump goes into. Entries whose version differs from its merge base with HEAD
+      are refreshed. Empty means origin/<the repository's default branch>.
+    default: ""
+  python:
+    description: >-
+      A Python 3.13 or newer to run with. Empty installs one with actions/setup-python, without
+      changing the job's own Python.
+    default: ""
+  commit:
+    description: Commit and push the new checksums to the branch ("true"), or only write them ("false").
+    default: "true"
+  commit-message:
+    description: The commit's subject line. Its body lists every checksum rewritten.
+    default: Update the checksums of the moved inputs
+
+outputs:
+  changed:
+    description: How many checksums were rewritten (0 when the bump needed none).
+    value: ${{ steps.refresh.outputs.changed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Python for input-lock
+      id: python
+      if: inputs.python == ''
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.15"
+        update-environment: false
+
+    - name: Rewrite the checksums of the entries this branch moved
+      id: refresh
+      shell: bash
+      env:
+        PYTHON: ${{ inputs.python || steps.python.outputs.python-path }}
+        TOOL: ${{ github.action_path }}/bin/input-lock
+        LOCK: ${{ inputs.lock }}
+        BASE: ${{ inputs.base || format('origin/{0}', github.event.repository.default_branch) }}
+      run: |
+        set -euo pipefail
+        log="$RUNNER_TEMP/input-lock-refresh.log"
+        "$PYTHON" -I "$TOOL" check --lock "$LOCK"
+        "$PYTHON" -I "$TOOL" refresh --lock "$LOCK" --base "$BASE" | tee "$log"
+        echo "changed=$(grep -c . "$log" || true)" >> "$GITHUB_OUTPUT"
+        if [ -s "$log" ]; then
+          { echo '```'; cat "$log"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "No checksum to change: no entry moved, or the checksums are already right." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Commit them to this branch
+      if: inputs.commit == 'true' && steps.refresh.outputs.changed != '0'
+      shell: bash
+      env:
+        LOCK: ${{ inputs.lock }}
+        SUBJECT: ${{ inputs.commit-message }}
+      run: |
+        set -euo pipefail
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add -- "$LOCK"
+        git commit -q -m "$SUBJECT" -m "$(cat "$RUNNER_TEMP/input-lock-refresh.log")"
+        git push origin "HEAD:${GITHUB_REF_NAME}"

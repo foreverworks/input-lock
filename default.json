@@ -1,0 +1,26 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "input-lock: Renovate reads every entry of a lock.json that has a datasource and moves its version; the input-lock Action then commits the new checksums to the same branch.",
+  "customManagers": [
+    {
+      "customType": "jsonata",
+      "description": "input-lock's lock.json: one entry per downloaded file, `version` the pin, Renovate's lookup beside it. An entry without a datasource is not Renovate's: it is bumped by hand.",
+      "fileFormat": "json",
+      "managerFilePatterns": ["/(^|/)lock\\.json$/"],
+      "matchStrings": [
+        "inputs.*[$exists(datasource)].{\"depName\": depName, \"packageName\": packageName, \"currentValue\": version, \"datasource\": datasource, \"versioning\": versioning, \"extractVersion\": extractVersion, \"registryUrl\": registryUrl}"
+      ]
+    }
+  ],
+  "gitIgnoredAuthors": ["41898282+github-actions[bot]@users.noreply.github.com"],
+  "packageRules": [
+    {
+      "description": "A lock entry's checksum arrives as a second commit on the branch, from the input-lock Action.",
+      "matchManagers": ["custom.jsonata"],
+      "matchFileNames": ["**/lock.json", "lock.json"],
+      "prBodyNotes": [
+        "This bump moves an entry of an input-lock `lock.json`. The input-lock Action commits its new checksums to this branch within minutes of each push: merge once that commit is here, or once its run says no checksum had to change."
+      ]
+    }
+  ]
+}
