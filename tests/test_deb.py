@@ -23,13 +23,13 @@ SHA512: cccc
 class Deb(unittest.TestCase):
     def test_index_urls(self) -> None:
         self.assertEqual(
-            index_urls("https://e.com/debian/?suite=trixie&components=stable,test&binaryArch=arm64"),
+            index_urls("https://example.com/debian/?suite=trixie&components=stable,test&binaryArch=arm64"),
             [
-                "https://e.com/debian/dists/trixie/stable/binary-arm64/Packages",
-                "https://e.com/debian/dists/trixie/test/binary-arm64/Packages",
+                "https://example.com/debian/dists/trixie/stable/binary-arm64/Packages",
+                "https://example.com/debian/dists/trixie/test/binary-arm64/Packages",
             ],
         )
-        self.assertTrue(index_urls("https://e.com?suite=s&components=main")[0].endswith("/binary-amd64/Packages"))
+        self.assertTrue(index_urls("https://example.com?suite=s&components=main")[0].endswith("/binary-amd64/Packages"))
 
     def test_find(self) -> None:
         self.assertEqual(
@@ -44,9 +44,9 @@ class Deb(unittest.TestCase):
 
     def test_same_file(self) -> None:
         published = Published("pool/main/t/tool/tool_1.1.0%7erc1_amd64.deb", {})
-        entry = {"version": "1.1.0~rc1", "url": "https://e.com/pool/tool_{version}_amd64.deb"}
+        entry = {"version": "1.1.0~rc1", "url": "https://example.com/pool/tool_{version}_amd64.deb"}
         self.assertTrue(same_file(entry, published))
-        self.assertFalse(same_file({**entry, "url": "https://e.com/pool/other_{version}_amd64.deb"}, published))
+        self.assertFalse(same_file({**entry, "url": "https://example.com/pool/other_{version}_amd64.deb"}, published))
         self.assertFalse(same_file(entry, Published("", {})))
 
 

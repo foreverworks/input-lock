@@ -9,7 +9,20 @@ from pathlib import Path
 
 from . import __version__, fetch
 from .identity import input_identity
-from .lock import Entry, Lock, LockError, build_env, dump, entries_for, loads, parse, placeholders, render_url, shell
+from .lock import (
+    Entry,
+    Lock,
+    LockError,
+    build_env,
+    dump,
+    entries_for,
+    loads,
+    parse,
+    placeholders,
+    problems,
+    render_url,
+    shell,
+)
 from .refresh import apply, describe, moved
 
 DEFAULT_LOCK = "lock.json"
@@ -29,14 +42,30 @@ def git(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def file_at(rev: str, path: str) -> str:
-    """The lock's text at a git revision (its merge base with HEAD), '' when the file was not there yet."""
+    """The lock's text at a git revision (its merge base with HEAD), '' when the file was not there yet.
+
+    Only a file the base does not have is ''. Any other git failure raises: reading it as 'no lock yet'
+    would refresh every entry."""
     where = Path(path).resolve()
     base = git(["merge-base", rev, "HEAD"], where.parent)
     if base.returncode != 0:
         why = base.stderr.strip() or "no common ancestor (a shallow checkout? check out with fetch-depth: 0)"
         raise LockError(f"git merge-base {rev} HEAD: {why}")
-    shown = git(["show", f"{base.stdout.strip()}:./{where.name}"], where.parent)
-    return shown.stdout if shown.returncode == 0 else ""
+    commit = base.stdout.strip()
+    listed = git(["ls-tree", "--name-only", commit, "--", where.name], where.parent)
+    if listed.returncode != 0:
+        raise LockError(f"git ls-tree {commit} {where.name}: {listed.stderr.strip() or 'failed'}")
+    if not listed.stdout.strip():
+        return ""
+    shown = git(["show", f"{commit}:./{where.name}"], where.parent)
+    if shown.returncode != 0:
+        raise LockError(f"git show {commit}:{where.name}: {shown.stderr.strip() or 'failed'}")
+    return shown.stdout
+
+
+def in_its_own_form(current: str) -> bool:
+    """The lock's text is exactly what `format` writes."""
+    return dump(loads(current)) == current
 
 
 def selected(lock: Lock, image: str | None, names: Sequence[str]) -> dict[str, Entry]:
@@ -72,8 +101,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 def cmd_format(args: argparse.Namespace) -> int:
     current = read(args.lock)
-    data = loads(current)
-    wanted = dump(data)
+    wanted = dump(loads(current))
     if current == wanted:
         return 0
     if args.check or args.lock == "-":
@@ -119,7 +147,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
 def cmd_refresh(args: argparse.Namespace) -> int:
     if args.lock == "-":
         raise LockError("refresh rewrites the lock in place: give it a file, not '-'")
-    lock = read_lock(args.lock)
+    current = read(args.lock)
+    lock = parse(current)
+    if not in_its_own_form(current):  # the commit must hold the new checksums and nothing else
+        raise LockError(
+            "not in its own form: run `input-lock format` first, so the checksum commit changes only checksums"
+        )
     if args.entry:
         names = sorted(selected(lock, None, args.entry))
     elif args.base:
@@ -139,13 +172,17 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         print(f"{args.lock}: nothing written, {failed} of {len(names)} moved entries failed", file=sys.stderr)
         return 1
     new, changes = apply(lock, computed, sources)
+    wanted = dump(new)
+    found = problems(loads(wanted))
+    if found:  # whatever a vendor or a download gave: nothing reaches the file unless the lock still checks
+        raise LockError("refusing to write, the new checksums make the lock invalid:\n" + "\n".join(found))
     for change in changes:
         print(describe(change))
     unchanged = sorted(set(names) - {change.name for change in changes})
     if unchanged:
         print(f"already right: {', '.join(unchanged)}", file=sys.stderr)
     if changes:
-        Path(args.lock).write_text(dump(new), encoding="utf-8")
+        Path(args.lock).write_text(wanted, encoding="utf-8")
     return 0
 
 

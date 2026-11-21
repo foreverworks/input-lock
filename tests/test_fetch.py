@@ -39,10 +39,10 @@ class Fetch(unittest.TestCase):
         )
 
     def test_no_downgrade(self) -> None:
-        fetch.no_downgrade("https://e.com/a", "https://cdn.e.com/a")
+        fetch.no_downgrade("https://example.com/a", "https://cdn.example.com/a")
         fetch.no_downgrade("file:///a", "file:///a")
         with self.assertRaises(ValueError):
-            fetch.no_downgrade("https://e.com/a", "http://e.com/a")
+            fetch.no_downgrade("https://example.com/a", "http://example.com/a")
 
     def test_a_broken_index_is_a_value_error(self) -> None:
         with TemporaryDirectory() as held:

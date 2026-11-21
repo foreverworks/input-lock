@@ -17,7 +17,7 @@ from typing import Final, Literal
 
 from . import __version__
 from .deb import Published, find, index_urls, package, same_file
-from .lock import Entry, checksums, render_url, text
+from .lock import Entry, checksums, is_checksum, render_url, text
 from .refresh import wanted
 
 TIMEOUT: Final = 120
@@ -133,6 +133,9 @@ def checksums_for(entry: Entry) -> tuple[dict[str, str], str]:
     if "apt" in entry:
         found, source = published(entry)
         got = {algorithm: value for algorithm, value in found.checksums.items() if algorithm in want}
+        for algorithm, value in got.items():
+            if not is_checksum(algorithm, value):  # an index is a vendor's text: never written into a lock unread
+                raise ValueError(f"{source} gives {algorithm} {value!r} for the version, which is not a hex digest")
     rest = [algorithm for algorithm in want if algorithm not in got]
     if rest:
         cross = ["sha256"] if "sha256" in got else []

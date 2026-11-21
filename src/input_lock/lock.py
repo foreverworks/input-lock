@@ -173,6 +173,11 @@ def checksums(entry: Entry) -> dict[str, str]:
     return {algorithm: value for algorithm in CHECKSUMS if isinstance(value := entry.get(algorithm), str)}
 
 
+def is_checksum(algorithm: str, value: str) -> bool:
+    """`value` is what `algorithm` prints: lowercase hex of the algorithm's length."""
+    return algorithm in CHECKSUMS and re.fullmatch(f"[0-9a-f]{{{CHECKSUMS[algorithm]}}}", value) is not None
+
+
 def used_by(entry: Entry) -> list[str] | None:
     """The images (or any other units) that install this input, or None when the entry does not say."""
     value = entry.get("used_by")
@@ -308,7 +313,7 @@ def entry_problems(name: str, raw: JsonValue, images: frozenset[str] | None = No
     if not sums:
         found.append(f"{where}: no checksum ({', '.join(CHECKSUMS)})")
     for algorithm, value in sums.items():
-        if not re.fullmatch(f"[0-9a-f]{{{CHECKSUMS[algorithm]}}}", value):
+        if not is_checksum(algorithm, value):
             found.append(f"{where}.{algorithm} is not {CHECKSUMS[algorithm]} lowercase hex digits")
     found.extend(used_by_problems(where, entry, images))
     found.extend(renovate_problems(where, entry))

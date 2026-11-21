@@ -2,6 +2,7 @@ name: input-lock checksums
 description: >-
   On a push to a Renovate branch, rewrite the checksum of every lock entry whose version moved
   (from the download, or from the vendor's Packages index for a .deb) and commit it to that branch.
+  The lock must already be in its own form (input-lock format).
 author: foreverworks
 branding:
   icon: lock
@@ -58,6 +59,7 @@ runs:
         set -euo pipefail
         log="$RUNNER_TEMP/input-lock-refresh.log"
         "$PYTHON" -I "$TOOL" check --lock "$LOCK"
+        "$PYTHON" -I "$TOOL" format --check --lock "$LOCK"  # the commit must change checksums and nothing else
         "$PYTHON" -I "$TOOL" refresh --lock "$LOCK" --base "$BASE" | tee "$log"
         echo "changed=$(grep -c . "$log" || true)" >> "$GITHUB_OUTPUT"
         if [ -s "$log" ]; then
@@ -82,5 +84,5 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git add -- "$LOCK"
-        git commit -q -m "$SUBJECT" -m "$(cat "$RUNNER_TEMP/input-lock-refresh.log")"
+        git commit -q -m "$SUBJECT" -m "$(cat "$RUNNER_TEMP/input-lock-refresh.log")" -- "$LOCK"
         git push origin "HEAD:${GITHUB_REF_NAME}"

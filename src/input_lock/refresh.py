@@ -77,5 +77,6 @@ def apply(
 
 
 def describe(change: Change) -> str:
-    """One line for a log or a commit message."""
-    return f"{change.name}: {change.algorithm} {change.new} (from {change.source or change.url})"
+    """One line for a log or a commit message: the old value and the new one, and where the new one came from."""
+    old = change.old or "(none)"
+    return f"{change.name}: {change.algorithm} {old} -> {change.new} (from {change.source or change.url})"

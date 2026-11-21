@@ -60,6 +60,13 @@ class Workspace(unittest.TestCase):
     def url(self, path: str) -> str:
         return (self.root / path).as_uri()
 
+    def index(self, *stanzas: tuple[str, str]) -> None:
+        """Replace the vendor's Packages index with one stanza of pkg per (version, SHA256 text)."""
+        text = "\n".join(
+            f"Package: pkg\nVersion: {v}\nFilename: pool/pkg_{v}_amd64.deb\nSHA256: {s}\n" for v, s in stanzas
+        )
+        (self.root / "apt/dists/s/main/binary-amd64/Packages.gz").write_bytes(gzip.compress(text.encode()))
+
     def base_lock(self) -> dict[str, object]:
         dl = self.url("dl")
         return {
