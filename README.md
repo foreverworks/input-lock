@@ -229,6 +229,28 @@ The lock's part is done for you: `lock_dependencies(lock, names)` lists the lock
 download with its checksums for provenance, and `input_packages(lock, names)` lists them as SPDX
 packages. Signing is left to the publisher (cosign, a KMS); the envelopes come unsigned.
 
+## The library
+
+Everything the commands do is a function in `input_lock`, for a build tool that reads the lock
+instead of re-implementing it. What `input_lock.__all__` lists is the public API, and a release
+that changes it says so:
+
+| Name | Does |
+|---|---|
+| `parse(text, images=None)`, `loads(text)`, `dump(lock)`, `schema_of(data)` | read, check and write the file |
+| `problems(data, images=None)`, `entry_problems(name, entry, images=None)` | every problem of a lock, or of one entry, as a sentence, for your own checks to extend |
+| `render_url(entry)`, `placeholders(entry)`, `checksums(entry)`, `used_by(entry)` | what an entry says |
+| `build_fields(entry)`, `entries_for(lock, image)`, `entry_env(name, entry)`, `env_name(name)` | what a build reads |
+| `build_env(lock, image=None, snapshot=True)`, `shell(pairs)` | a build.env; `snapshot=False` leaves `LOCK_DEBIAN_SNAPSHOT` out, for an environment (a hook's) that must not see the build snapshot |
+| `input_identity(...)`, `files_digest(files)`, `lock_digest(lock)`, `digest(value)`, `canonical(value)` | identities and digests |
+| `SNAPSHOT_ID` | the pattern of a snapshot.debian.org ID, for a field of your own that holds one |
+| `SCHEMA`, `CHECKSUMS`, `HINTS`, `BOOKKEEPING`, `NOT_BUILD_FIELDS` | the format's constants |
+| `Lock`, `Entry`, `Value`, `JsonValue`, `LockError`, `Package` | the types |
+
+The modules `input_lock.records` (the records above), `input_lock.fetch` (the network),
+`input_lock.deb` (a vendor's apt repository) and `input_lock.refresh` (the refresh plan) are
+public too. Anything else is internal and may move in any release.
+
 ## Reference
 
 - [docs/format.md](docs/format.md): every field, every rule, build.env, the identity, the library
@@ -242,7 +264,7 @@ Commands (`--lock <file>` on each, default `lock.json`, `-` for stdin):
 | `check [--image NAME]...` | validate; exit 1 naming every problem |
 | `format [--check]` | rewrite in the file's own form, or check it is |
 | `get ENTRY [FIELD]` | print a field; `url` (the default) comes rendered |
-| `env [--image NAME]` | print a build.env |
+| `env [--image NAME] [--no-snapshot]` | print a build.env |
 | `sh` | print `lock.sh`, the shell helpers |
 | `identity [--image NAME \| --entry NAME...]` | print the input identity of those entries |
 | `verify [--entry NAME]...` | download and compare every checksum |

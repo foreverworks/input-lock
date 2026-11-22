@@ -53,6 +53,9 @@ class Cli(unittest.TestCase):
             run("env", "--image", "builder", "--lock", "-", stdin=EXAMPLE_TEXT).stdout,
             shell(build_env(lock, "builder")),
         )
+        snapshot = EXAMPLE_TEXT.replace('"inputs": {', '"debian_snapshot": "20261121T005332Z",\n  "inputs": {', 1)
+        self.assertIn("LOCK_DEBIAN_SNAPSHOT=", run("env", "--lock", "-", stdin=snapshot).stdout)
+        self.assertNotIn("LOCK_DEBIAN_SNAPSHOT=", run("env", "--no-snapshot", "--lock", "-", stdin=snapshot).stdout)
         self.assertEqual(run("identity", "--lock", EXAMPLE).stdout.strip(), input_identity([], lock["inputs"]))
         self.assertEqual(
             run("identity", "--image", "builder", "--lock", EXAMPLE).stdout,

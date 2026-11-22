@@ -69,6 +69,7 @@ NAME: Final = re.compile(r"[a-z0-9][a-z0-9-]*")
 FIELD: Final = re.compile(r"[a-z][a-z0-9_]*")
 PLACEHOLDER: Final = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 SNAPSHOT_ID: Final = re.compile(r"\d{8}T\d{6}Z")
+"""A snapshot.debian.org ID, YYYYMMDDTHHMMSSZ: what `debian_snapshot` holds. Match it with `fullmatch`."""
 URL_SCHEMES: tuple[str, ...] = ("https://",)
 """The schemes a url may use. Tests widen it to file:// for offline downloads."""
 
@@ -222,11 +223,14 @@ def entry_env(name: str, entry: Entry) -> list[tuple[str, str]]:
     ]
 
 
-def build_env(lock: Lock, image: str | None = None) -> list[tuple[str, str]]:
-    """[(KEY, value)] for a build.env: the snapshot (when the lock has one), LOCK_ENTRIES, every entry's fields."""
+def build_env(lock: Lock, image: str | None = None, *, snapshot: bool = True) -> list[tuple[str, str]]:
+    """[(KEY, value)] for a build.env: the snapshot (when the lock has one), LOCK_ENTRIES, every entry's fields.
+
+    snapshot=False leaves LOCK_DEBIAN_SNAPSHOT out, for an environment that must not see the build
+    snapshot (a hook's, say), even when the lock has one."""
     own = entries_for(lock, image)
     pairs: list[tuple[str, str]] = []
-    if "debian_snapshot" in lock:
+    if snapshot and "debian_snapshot" in lock:
         pairs.append(("LOCK_DEBIAN_SNAPSHOT", lock["debian_snapshot"]))
     pairs.append(("LOCK_ENTRIES", " ".join(own)))
     for name, entry in own.items():

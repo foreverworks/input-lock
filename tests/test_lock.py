@@ -208,6 +208,22 @@ class BuildFields(unittest.TestCase):
         self.assertEqual(set(build_fields(entry)), {"version", "url", "sha1", "module", "sdk"})
 
 
+class PublicApi(unittest.TestCase):
+    def test_what_a_consumer_imports_is_public(self) -> None:
+        import input_lock
+        from input_lock import lock as lock_module
+
+        for name in ("SNAPSHOT_ID", "entry_problems", "entry_env", "build_env", "problems"):
+            with self.subTest(name=name):
+                self.assertIn(name, input_lock.__all__)
+                self.assertIs(getattr(input_lock, name), getattr(lock_module, name))
+        self.assertTrue(input_lock.SNAPSHOT_ID.fullmatch("20261121T005332Z"))
+        self.assertEqual(
+            input_lock.entry_problems("x", {"version": "1"}),
+            ["inputs.x: no url", "inputs.x: no checksum (sha256, sha512, sha1)"],
+        )
+
+
 class BuildEnv(unittest.TestCase):
     def test_one_shell_word_per_value(self) -> None:
         lock = example()
@@ -233,6 +249,13 @@ class BuildEnv(unittest.TestCase):
         lock["debian_snapshot"] = "20261121T005332Z"
         self.assertIn(("LOCK_DEBIAN_SNAPSHOT", "20261121T005332Z"), build_env(lock))
         self.assertEqual(env_name("android-system-image-34"), "LOCK_ANDROID_SYSTEM_IMAGE_34")
+
+    def test_the_snapshot_can_be_left_out(self) -> None:
+        lock = copy.deepcopy(example())
+        lock["debian_snapshot"] = "20261121T005332Z"
+        without = build_env(lock, snapshot=False)
+        self.assertNotIn("LOCK_DEBIAN_SNAPSHOT", dict(without))
+        self.assertEqual(without, build_env(lock)[1:], "only the snapshot line goes")
 
     def test_quoting(self) -> None:
         self.assertEqual(shell([("A", "it's a value")]), "A='it'\"'\"'s a value'\n")

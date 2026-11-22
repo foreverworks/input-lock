@@ -125,7 +125,8 @@ LOCK_JQ_VERSION=1.8.2
 ```
 
 `LOCK_<ENTRY>` is the name upper-cased with dashes as underscores; `<FIELD>` is the field
-upper-cased. `LOCK_DEBIAN_SNAPSHOT` comes first when the lock has one. `input-lock sh` prints
+upper-cased. `LOCK_DEBIAN_SNAPSHOT` comes first when the lock has one, unless `env --no-snapshot`
+(`build_env(..., snapshot=False)`) leaves it out, for an environment that must not see it. `input-lock sh` prints
 `lock.sh`, the helpers a build sources after build.env:
 
 | Helper | Does |
@@ -187,9 +188,12 @@ Everything above is a function in `input_lock`, typed and standard library only:
 |---|---|
 | `parse(text, images=None) -> Lock` | load and check; raises `LockError` naming every problem |
 | `problems(data, images=None) -> list[str]` | every problem as a sentence, for your own checks to extend |
+| `entry_problems(name, entry, images=None) -> list[str]` | the same for one entry, alone (no rule between entries) |
+| `SNAPSHOT_ID` | the pattern a `debian_snapshot` matches (`SNAPSHOT_ID.fullmatch(text)`) |
 | `dump(lock) -> str` | the file's own form |
 | `render_url(entry)`, `placeholders(entry)`, `checksums(entry)`, `used_by(entry)` | what an entry says |
-| `build_fields(entry)`, `entries_for(lock, image)`, `build_env(lock, image)`, `shell(pairs)` | what a build reads |
+| `build_fields(entry)`, `entries_for(lock, image)`, `entry_env(name, entry)`, `shell(pairs)` | what a build reads |
+| `build_env(lock, image=None, snapshot=True)` | a build.env's pairs; `snapshot=False` leaves `LOCK_DEBIAN_SNAPSHOT` out |
 | `input_identity(...)`, `files_digest(files)`, `lock_digest(lock)`, `digest(value)`, `canonical(value)` | identities and digests |
 | `input_lock.records` | in-toto statements, SLSA provenance v1, SPDX 2.3, test results, DSSE envelopes |
 | `input_lock.deb`, `input_lock.fetch`, `input_lock.refresh` | a vendor's index, the network, and the refresh plan |

@@ -120,7 +120,7 @@ def cmd_get(args: argparse.Namespace) -> int:
 
 
 def cmd_env(args: argparse.Namespace) -> int:
-    sys.stdout.write(shell(build_env(read_lock(args.lock), args.image)))
+    sys.stdout.write(shell(build_env(read_lock(args.lock), args.image, snapshot=not args.no_snapshot)))
     return 0
 
 
@@ -223,6 +223,9 @@ def parser() -> argparse.ArgumentParser:
 
     env = command("env", "print a build.env: LOCK_<ENTRY>_<FIELD>=value for every field a build reads")
     env.add_argument("--image", help="only the entries whose used_by lists this image")
+    env.add_argument(
+        "--no-snapshot", action="store_true", help="leave LOCK_DEBIAN_SNAPSHOT out, even when the lock has one"
+    )
     env.set_defaults(run=cmd_env)
 
     identity = command(
