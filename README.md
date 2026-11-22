@@ -270,7 +270,13 @@ the missing tool, rather than fall back to trusting HTTPS. A signature passes wh
 and reports a valid signature by a key of the pinned keyring, and no bad, expired or revoked one.
 Only the text `gpgv` says is signed is read; a clear-signed file with anything around its one
 signed message is refused. The keyring may be binary (a `.gpg` keyring or a `.kbx` keybox) or
-ASCII-armored (a vendor's `gpg.key`), which input-lock unwraps first.
+ASCII-armored (a vendor's `gpg.key`), which input-lock unwraps first, and is pinned by sha256 or
+sha512. It must hold every key the vendor signs one file with: a second signature by a key it
+lacks fails the check, as a bad one does. Tested with gpgv 2.4.
+
+A `Release` without `Valid-Until` has no freshness check: an older signed `Release` of the same
+suite would still pass. That cannot move an entry to a version the vendor never signed, since the
+version is pinned and must be in the index, but it is the vendor's choice to bound, not ours.
 
 `check` needs no `gpgv` and no network: it checks that the fields fit together (`signed_by` names
 an entry, `sums_url` and `sums_sig_url` are https templates, an apt entry takes no `sums_url`).
@@ -282,8 +288,11 @@ so do Node.js (`node-version`) and many projects that attach a signed `SHA256SUM
 releases (`github-releases`). The npm registry's signatures and Sigstore attestations are not
 OpenPGP and are not covered; such entries stay trust on first use.
 
-input-lock 0.1.0 reads these fields as fields of your own: it checks no signature and counts them
-in the identity. Pin 0.2.0 or later wherever the check matters.
+**A lock that uses these fields is schema 2.** input-lock 0.1.0 reads schema 1 only, so it
+refuses such a lock ("upgrade input-lock to read it") instead of reading the fields as plain ones
+and checking nothing. `input-lock format` writes `"schema": 2` exactly when an entry uses one of
+them, and `1` again when none does; `check` refuses a lock that uses them without it. A lock with
+no signature fields stays schema 1, readable by every release.
 
 ## Records
 
@@ -339,8 +348,11 @@ Commands (`--lock <file>` on each, default `lock.json`, `-` for stdin):
 
 Version 0.2.0. It adds signed checksums (`signed_by`, `sums_url`, `sums_sig_url`), `env
 --no-snapshot` and `build_env(..., snapshot=False)`, and makes `SNAPSHOT_ID`, `entry_problems`,
-`entry_env` and `TRUST` public. The lock format is still schema 1 and is meant to stay readable by
-every later release; a lock from a newer schema fails with a clear message instead of a guess.
+`entry_env`, `TRUST` and `schema_needed` public. A lock that uses signed checksums is schema 2;
+every other lock stays schema 1. Both are meant to stay readable by every later release; a lock
+from a newer schema fails with a clear message instead of a guess. The names `signed_by`,
+`sums_url` and `sums_sig_url` now belong to the format: a field of your own by one of those names
+is read as this release defines it.
 The library and commands may still change before 1.0, and the release notes on GitHub will say how.
 
 Known limits:

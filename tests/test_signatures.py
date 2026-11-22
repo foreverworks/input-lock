@@ -59,6 +59,7 @@ class Signed(Workspace):
         self.sums({"tool-1.0.0.bin": sha(b"one"), "tool-1.1.0.bin": sha(b"two")})
         self.release()
         data = self.read()
+        data["schema"] = 2  # type: ignore[assignment]
         data["inputs"]["keys"] = {"version": "1", "url": self.url("dl/keys.gpg"), "sha256": self.digest("keys.gpg")}
         data["inputs"]["pkg"]["signed_by"] = "keys"
         data["inputs"]["tool"]["signed_by"] = "keys"
@@ -203,6 +204,65 @@ class Signed(Workspace):
             code, out, _ = self.cli("verify", "--entry", "tool")
         self.assertEqual(code, 1)
         self.assertIn("error    tool: gpgv is not installed", out)
+
+    def test_an_unvouched_plain_index_is_not_read(self) -> None:
+        plain = self.root / "apt/dists/s/main/binary-amd64/Packages"
+        plain.write_text(f"Package: pkg\nVersion: 1.1.0\nFilename: pool/pkg_1.1.0_amd64.deb\nSHA256: {sha(b'evil')}\n")
+        self.bump(pkg="1.1.0")
+        code, _, err = self.refreshed("pkg")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.read()["inputs"]["pkg"]["sha256"], sha(b"deb-two"), "the signed .gz, not the plain one")
+
+    def test_an_expired_release(self) -> None:
+        dists = self.root / "apt" / "dists" / "s"
+        index = (dists / "main" / "binary-amd64" / "Packages.gz").read_bytes()
+        text = (
+            "Suite: s\nValid-Until: Sat, 01 Jan 2000 00:00:00 UTC\n"
+            f"SHA256:\n {sha(index)} {len(index)} main/binary-amd64/Packages.gz\n"
+        ).encode()
+        (dists / "InRelease").write_bytes(self.sign(text, "--clearsign"))
+        self.bump(pkg="1.1.0")
+        self.assert_refused("expired", "pkg")
+
+    def test_a_signature_by_an_expired_key(self) -> None:
+        then = ("--faked-system-time", "20200101T000000")
+        gpg(self.home, *then, "--quick-gen-key", "old <old@example.com>", "ed25519", "sign", "1y")
+        (self.root / "dl" / "keys.gpg").write_bytes(gpg(self.home, "--export", "old@example.com"))
+        self.set_entry("keys", sha256=self.digest("keys.gpg"))
+        text = f"{sha(b'two')}  tool-1.1.0.bin\n".encode()
+        (self.root / "dl" / "SHA256SUMS.asc").write_bytes(
+            gpg(self.home, *then, "--local-user", "old@example.com", "--clearsign", "--output", "-", data=text)
+        )
+        self.bump(tool="1.1.0")
+        self.assert_refused("EXPKEYSIG", "tool")
+
+    def test_a_signed_entry_without_a_list_or_a_strong_keyring_fails_in_the_library(self) -> None:
+        lock = self.read()
+        cache: dict[str, bytes] = {}
+        ring = fetch.keyring_for(lock, lock["inputs"]["tool"], cache)  # type: ignore[arg-type]
+        self.assertEqual(cache, {"keys": ring}, "one read per keyring and run")
+        bare = {key: value for key, value in lock["inputs"]["tool"].items() if key != "sums_url"}
+        with self.assertRaises(ValueError) as caught:
+            fetch.checksums_for(bare, ring)  # type: ignore[arg-type]
+        self.assertIn("needs a sums_url", str(caught.exception))
+        weak = {
+            "version": "1",
+            "url": self.url("dl/keys.gpg"),
+            "sha1": sha((self.root / "dl/keys.gpg").read_bytes(), "sha1"),
+        }
+        with self.assertRaises(ValueError) as caught:
+            fetch.keyring(weak)
+        self.assertIn("pinned by sha256 or sha512", str(caught.exception))
+        with self.assertRaises(ValueError):
+            fetch.keyring({"version": "1", "url": self.url("dl/keys.gpg")})
+
+    def test_a_file_outside_the_lists_folder_is_downloaded_and_compared(self) -> None:
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "tool-1.1.0.bin").write_bytes(b"not two")
+        self.set_entry("tool", url=self.url("elsewhere") + "/tool-{version}.bin", sha1="")
+        self.bump(tool="1.1.0")
+        self.assert_refused("SHA256SUMS.asc says", "tool")
 
     def test_the_library_needs_the_keyring(self) -> None:
         entry = self.read()["inputs"]["tool"]

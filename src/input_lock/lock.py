@@ -3,7 +3,7 @@
 A lock is a JSON object:
 
     {
-      "schema": 1,                          optional; a lock without it is schema 1
+      "schema": 1,                          optional; a lock without it is schema 1; 2 when it uses TRUST
       "debian_snapshot": "20261121T005332Z" optional; a snapshot.debian.org ID for Debian builds
       "inputs": { "<name>": <entry>, ... }  one entry per downloaded file
     }
@@ -45,8 +45,10 @@ class LockError(ValueError):
     """The lock is not one this library can read: its message names every problem, one per line."""
 
 
-SCHEMA: Final = 1
-"""The schema this library writes and reads. A lock with a higher one needs a newer release."""
+SCHEMA: Final = 2
+"""The highest schema this library reads. A lock is schema 1 unless it uses a TRUST field, which needs
+schema 2: input-lock 0.1.0 reads schema 1 only, so it refuses such a lock instead of reading its
+signature fields as plain fields and checking nothing. A lock with a higher schema needs a newer release."""
 
 CHECKSUMS: Final[Mapping[str, int]] = {"sha256": 64, "sha512": 128, "sha1": 40}
 """Every checksum an entry may carry, and its length in hex digits."""
@@ -114,15 +116,40 @@ def parse(text: str, images: Iterable[str] | None = None) -> Lock:
 
 
 def dump(lock: object) -> str:
-    """The lock as its file holds it: 2-space indent, sorted keys, UTF-8, a trailing newline.
+    """The lock as its file holds it: 2-space indent, sorted keys, UTF-8, a trailing newline, and the
+    schema it needs (`with_schema`).
 
     Tools and people write the same bytes, so a diff shows only what moved."""
-    return json.dumps(lock, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return json.dumps(with_schema(lock), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def schema_needed(data: JsonValue) -> int:
+    """The lowest schema that can hold `data`: 2 when an entry uses a TRUST field, else 1."""
+    inputs = data.get("inputs") if isinstance(data, dict) else None
+    if isinstance(inputs, dict) and any(
+        isinstance(entry, dict) and any(field in entry for field in TRUST) for entry in inputs.values()
+    ):
+        return 2
+    return 1
+
+
+def with_schema(lock: object) -> object:
+    """The lock with `"schema": 2` when it needs it, and a 2 it no longer needs lowered to 1; else as it is.
+
+    A lock without a schema field gains none unless it needs 2, so a schema-1 lock keeps its bytes."""
+    if not isinstance(lock, dict) or not isinstance(lock.get("inputs"), dict):
+        return lock
+    needed = schema_needed(cast(JsonValue, lock))
+    if needed > 1:
+        return {**lock, "schema": needed}
+    if lock.get("schema") == 2:
+        return {**lock, "schema": 1}
+    return lock
 
 
 def schema_of(data: Mapping[str, JsonValue]) -> int:
     """The lock's schema: 1 when it has none. Raises LockError for one this release cannot read."""
-    schema = data.get("schema", SCHEMA)
+    schema = data.get("schema", 1)
     if not isinstance(schema, int) or isinstance(schema, bool) or schema < 1:
         raise LockError(f"schema must be a positive integer, not {schema!r}")
     if schema > SCHEMA:
@@ -266,10 +293,15 @@ def problems(data: JsonValue, images: Iterable[str] | None = None) -> list[str]:
     if not isinstance(data, dict):
         return ["a lock is a JSON object"]
     try:
-        schema_of(data)
+        schema = schema_of(data)
     except LockError as error:
         return [str(error)]
     found: list[str] = []
+    if schema_needed(data) > schema:
+        found.append(
+            f'the lock uses {", ".join(TRUST)}, which need "schema": 2, so that input-lock 0.1.0 refuses it '
+            "instead of checking no signature: run input-lock format"
+        )
     unknown = sorted(set(data) - set(TOP_LEVEL))
     if unknown:
         found.append(f"unknown top-level fields {unknown}: a lock holds {list(TOP_LEVEL)}")
@@ -398,6 +430,8 @@ def keyring_problems(entries: Mapping[str, Entry], names: frozenset[str]) -> lis
                 f"inputs.{name}.signed_by names {signer}, which is a trust root only when it is pinned by its "
                 "checksum alone (no signed_by, no apt)"
             )
+        elif signer in entries and not {"sha256", "sha512"} & set(checksums(entries[signer])):
+            found.append(f"inputs.{name}.signed_by names {signer}, a keyring, which must be pinned by sha256 or sha512")
     return found
 
 

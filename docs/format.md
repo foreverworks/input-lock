@@ -32,7 +32,7 @@ checksums changes checksums and nothing else.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `schema` | no | The format's version, `1`. A lock without it is read as schema 1, so an existing lock needs no edit. A lock with a higher number fails with "upgrade input-lock to read it", never with a guess. |
+| `schema` | no | The format's version: `2` when an entry uses `signed_by`, `sums_url` or `sums_sig_url` (required then), else `1`. A lock without it is read as schema 1, so an existing lock needs no edit. `format` writes the schema the lock needs. A lock with a higher number than a release reads fails with "upgrade input-lock to read it", never with a guess. |
 | `debian_snapshot` | no | A [snapshot.debian.org](https://snapshot.debian.org) ID (`YYYYMMDDTHHMMSSZ`) for builds that install Debian packages from a fixed point in time. Exported as `LOCK_DEBIAN_SNAPSHOT`. |
 | `inputs` | yes | One entry per downloaded file, keyed by its name: lowercase letters, digits and dashes. |
 
@@ -120,26 +120,29 @@ ASCII-armored, and hand it to `gpgv`:
 
 | Entry | What is signed | What is checked |
 |---|---|---|
-| apt (`apt` set) | `<repository>/dists/<suite>/InRelease`, or `Release` with `Release.gpg` | the signature; `Suite` or `Codename` is the `registryUrl`'s suite; `Valid-Until`, when present, is in the future; the `Packages` index read (plain, `.gz` or `.xz`) has the sha256 the signed file lists for it |
-| any other | the list at `sums_url`, clear-signed, or with the detached signature at `sums_sig_url` | the signature; exactly one line names the entry's file, `<hex>  <name>` or `<hex> *<name>`, where the name is the url's path relative to the list's folder (or its file name, for a url elsewhere); the hex's length says its algorithm (64 sha256, 128 sha512, 40 sha1) |
+| apt (`apt` set) | `<repository>/dists/<suite>/InRelease`, or `Release` with `Release.gpg` | the signature; `Suite` or `Codename` is the `registryUrl`'s suite; `Valid-Until`, when present, is in the future (a Release without one has no freshness check); the `Packages` index read (plain, `.gz` or `.xz`) has the sha256 the signed file lists for it |
+| any other | the list at `sums_url`, clear-signed, or with the detached signature at `sums_sig_url` | the signature; a line names the entry's file, and no two give it different checksums of one algorithm, `<hex>  <name>` or `<hex> *<name>`, where the name is the url's path relative to the list's folder (or its file name, for a url elsewhere, whose download is then always compared too); the hex's length says its algorithm (64 sha256, 128 sha512, 40 sha1) |
 
 A signature passes when `gpgv --status-fd` reports `VALIDSIG` and no `BADSIG`, `EXPSIG`,
 `EXPKEYSIG`, `REVKEYSIG` or `ERRSIG`, and `gpgv` exits 0. Only the text `gpgv` writes out as
 signed is read. A clear-signed file must be one signed message and nothing else, so text around it
-cannot pose as signed. Without `gpgv` on the PATH, a `signed_by` entry fails `refresh` and
+cannot pose as signed. The keyring must hold every key that signed the file, since a signature
+it cannot check fails as a bad one does. Without `gpgv` on the PATH, a `signed_by` entry fails `refresh` and
 `verify` with a message naming it; nothing falls back to HTTPS.
 
 The rules `check` applies, offline:
 
-- `signed_by` names another entry of the lock, which has no `signed_by` and no `apt` itself.
+- The lock is schema 2 (`input-lock format` writes it).
+- `signed_by` names another entry of the lock, which has no `signed_by` and no `apt` itself and
+  is pinned by sha256 or sha512.
 - An entry with `signed_by` that is not an apt one has a `sums_url`; an apt entry has none.
 - `sums_url` and `sums_sig_url` need `signed_by` (and `sums_sig_url` a `sums_url`), render from the
   entry's fields as `url` does, and are `https://`.
 
 `signed_by`, `sums_url` and `sums_sig_url` stay out of build.env and the identity: they say how a
-checksum was vouched for, and the checksum, which counts, says what the bytes are. input-lock 0.1.0
-reads them as fields of your own and checks no signature, so a lock that relies on them needs
-0.2.0 or later.
+checksum was vouched for, and the checksum, which counts, says what the bytes are. A lock that uses
+them is schema 2, so input-lock 0.1.0, which reads schema 1 only, refuses it rather than read them
+as fields of its own and check nothing.
 
 ### What a checksum vouches for
 
@@ -229,8 +232,14 @@ accident; moving from one to the other rebuilds everything once.
 
 A change that an older reader would misread (a new required field, a field whose meaning moves)
 raises the schema number. A new optional field that older readers can safely refuse does not.
+
+| Schema | Since | Adds |
+|---|---|---|
+| 1 | 0.1.0 | the format |
+| 2 | 0.2.0 | `signed_by`, `sums_url`, `sums_sig_url`. Required only by a lock that uses them, so 0.1.0 refuses that lock instead of checking no signature; a lock without them stays 1. |
+
 The next known candidate is several architectures per entry (an `{arch}` placeholder and
-checksums per architecture), which would be schema 2.
+checksums per architecture), which would be schema 3.
 
 ## The library
 
@@ -242,7 +251,8 @@ Everything above is a function in `input_lock`, typed and standard library only:
 | `problems(data, images=None) -> list[str]` | every problem as a sentence, for your own checks to extend |
 | `entry_problems(name, entry, images=None) -> list[str]` | the same for one entry, alone (no rule between entries) |
 | `SNAPSHOT_ID` | the pattern a `debian_snapshot` matches (`SNAPSHOT_ID.fullmatch(text)`) |
-| `dump(lock) -> str` | the file's own form |
+| `dump(lock) -> str` | the file's own form, with the schema the lock needs |
+| `schema_needed(data) -> int` | 2 when an entry uses a signature field, else 1 |
 | `render_url(entry)`, `placeholders(entry)`, `checksums(entry)`, `used_by(entry)` | what an entry says |
 | `build_fields(entry)`, `entries_for(lock, image)`, `entry_env(name, entry)`, `shell(pairs)` | what a build reads |
 | `build_env(lock, image=None, snapshot=True)` | a build.env's pairs; `snapshot=False` leaves `LOCK_DEBIAN_SNAPSHOT` out |

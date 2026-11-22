@@ -21,6 +21,7 @@ from input_lock.lock import (
     placeholders,
     problems,
     render_url,
+    schema_needed,
     schema_of,
     shell,
 )
@@ -65,13 +66,31 @@ class Schema(unittest.TestCase):
     def test_missing_is_one(self) -> None:
         self.assertEqual(schema_of({"inputs": {}}), 1)
         self.assertEqual(schema_of({"schema": 1, "inputs": {}}), 1)
+        self.assertEqual(schema_of({"schema": 2, "inputs": {}}), 2)
 
     def test_a_future_schema_says_to_upgrade(self) -> None:
         with self.assertRaises(LockError) as caught:
-            parse('{"schema": 2, "inputs": {}}')
-        self.assertIn("schema 2", str(caught.exception))
+            parse('{"schema": 3, "inputs": {}}')
+        self.assertIn("schema 3", str(caught.exception))
         self.assertIn("upgrade input-lock", str(caught.exception))
-        self.assertEqual(len(problems({"schema": 2, "inputs": "anything"})), 1, "nothing else is judged")
+        self.assertEqual(len(problems({"schema": 3, "inputs": "anything"})), 1, "nothing else is judged")
+
+    def test_signature_fields_need_schema_2(self) -> None:
+        keys = an_entry(version="1", url="https://example.com/keys.gpg")
+        signed = an_entry(signed_by="keys", sums_url="https://example.com/SUMS.asc")
+        for schema in (None, 1):
+            data: dict[str, object] = {"inputs": {"tool": signed, "keys": keys}}
+            if schema is not None:
+                data["schema"] = schema
+            with self.subTest(schema=schema):
+                self.assertIn('need "schema": 2', found(data))
+                self.assertIn('"schema": 2', dump(data), "format writes the schema the lock needs")
+                self.assertEqual(found(json.loads(dump(data))), "")
+        plain: dict[str, object] = {"schema": 2, "inputs": {"keys": keys}}
+        self.assertEqual(found(plain), "", "a schema-2 lock without them still reads")
+        self.assertIn('"schema": 1', dump(plain), "and format lowers it to 1")
+        self.assertNotIn("schema", dump({"inputs": {"keys": keys}}), "a lock without a schema gains none")
+        self.assertEqual(schema_needed(json.loads(json.dumps(plain))), 1)
 
     def test_a_schema_is_a_positive_integer(self) -> None:
         for bad in ("1", True, 0, 1.0, None):
@@ -182,7 +201,7 @@ def an_entry(**fields: object) -> dict[str, object]:
 
 
 def a_lock(**entries: object) -> dict[str, object]:
-    return {"inputs": entries}
+    return {"schema": 2, "inputs": entries}
 
 
 class Trust(unittest.TestCase):
@@ -231,6 +250,10 @@ class Trust(unittest.TestCase):
                 keys=an_entry(signed_by="tool", sums_url=sums),
             ),
             "must be a string": a_lock(tool=an_entry(signed_by=["keys"]), keys=self.keys()),
+            "pinned by sha256 or sha512": a_lock(
+                tool=an_entry(signed_by="keys", sums_url=sums),
+                keys={"version": "1", "url": "https://example.com/k.gpg", "sha1": "b" * 40},
+            ),
         }
         for needle, data in cases.items():
             with self.subTest(needle=needle):

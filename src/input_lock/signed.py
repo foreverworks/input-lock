@@ -85,12 +85,21 @@ def dearmor(data: bytes) -> bytes:
     return out
 
 
+def folder(sums_url: str) -> str:
+    """The folder a checksum list is in, with its trailing slash."""
+    return sums_url.split("?", 1)[0].rsplit("/", 1)[0] + "/"
+
+
+def under(url: str, sums_url: str) -> bool:
+    """The file at `url` is in the checksum list's folder or below it."""
+    return url.split("?", 1)[0].startswith(folder(sums_url))
+
+
 def sums_name(url: str, sums_url: str) -> str:
     """The name a checksum list gives the file at `url`: its path relative to the list's folder, or,
     for a file elsewhere, its file name."""
-    folder = sums_url.split("?", 1)[0].rsplit("/", 1)[0] + "/"
     path = url.split("?", 1)[0]
-    name = path[len(folder) :] if path.startswith(folder) else path.rsplit("/", 1)[-1]
+    name = path[len(folder(sums_url)) :] if under(url, sums_url) else path.rsplit("/", 1)[-1]
     return urllib.parse.unquote(name)
 
 

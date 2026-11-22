@@ -25,7 +25,7 @@ from . import __version__
 from .deb import Published, dists_url, find, index_urls, package, release_sums, same_file, suite_of
 from .lock import Entry, Lock, checksums, is_checksum, render, render_url, text
 from .refresh import wanted
-from .signed import clear_signed_problem, dearmor, listed, status_problem, sums_name
+from .signed import clear_signed_problem, dearmor, listed, status_problem, sums_name, under
 
 TIMEOUT: Final = 120
 """Seconds without a byte before a download is abandoned."""
@@ -34,6 +34,9 @@ CHUNK: Final = 1 << 20
 
 ERRORS: Final = (OSError, ValueError, http.client.HTTPException)
 """What a download, an index read or a signature check raises when it fails: the CLI reports these per entry."""
+
+STRONG: Final = ("sha256", "sha512")
+"""The checksums that may pin a keyring: a trust root is never pinned by sha1 alone."""
 
 GPGV_TIMEOUT: Final = 60
 """Seconds gpgv may take to check one signature."""
@@ -135,8 +138,11 @@ def keyring(entry: Entry) -> bytes:
     """The keyring a `signed_by` names, downloaded and checked against every checksum its entry carries,
     unwrapped from ASCII armor when it is armored. Raises ValueError when a checksum does not match."""
     url = render_url(entry)
+    pins = checksums(entry)
+    if not set(pins) & set(STRONG):
+        raise ValueError(f"the keyring {url} must be pinned by {' or '.join(STRONG)}: it is a trust root")
     data = required(url)
-    for algorithm, value in checksums(entry).items():
+    for algorithm, value in pins.items():
         if hashlib.new(algorithm, data).hexdigest() != value:
             raise ValueError(
                 f"the keyring {url} does not match its {algorithm} in the lock: a keyring moves by hand, "
@@ -156,6 +162,8 @@ def keyring_for(lock: Lock, entry: Entry, cache: MutableMapping[str, bytes] | No
         return cache[signer]
     if signer not in lock["inputs"]:
         raise ValueError(f"signed_by names {signer}, which is not an entry of the lock")
+    if any(field in lock["inputs"][signer] for field in ("signed_by", "apt")):
+        raise ValueError(f"signed_by names {signer}, which is a trust root only when pinned by its checksum alone")
     data = keyring(lock["inputs"][signer])
     if cache is not None:
         cache[signer] = data
@@ -286,6 +294,8 @@ def vendor_sums(entry: Entry, ring: bytes | None = None) -> tuple[dict[str, str]
         if ring is None:
             raise ValueError("a sums_url is read only with its signature checked, and the entry has no signed_by")
         return signed_sums(entry, ring)
+    if "signed_by" in entry:  # never a silent fall back to hashing the download
+        raise ValueError("signed_by needs a sums_url, the vendor's signed checksum list, for an entry that is not apt")
     return None
 
 
@@ -309,7 +319,9 @@ def checksums_for(entry: Entry, ring: bytes | None = None) -> tuple[dict[str, st
             raise ValueError(f"{source} gives {algorithm} {value!r} for the version, which is not a hex digest")
     got = {algorithm: value for algorithm, value in vouched.items() if algorithm in want}
     rest = [algorithm for algorithm in want if algorithm not in got]
-    if rest:
+    # a file outside the signed list's folder is found by its file name alone: compare its download too
+    elsewhere = "sums_url" in entry and not under(url, render(entry, "sums_url"))
+    if rest or elsewhere:
         downloaded = hashes(url, sorted({*rest, *vouched}))
         for algorithm, value in sorted(vouched.items()):
             if downloaded[algorithm] != value:
@@ -339,6 +351,6 @@ def verify(name: str, entry: Entry, ring: bytes | None = None) -> list[Finding]:
             if says != got[algorithm]:
                 message = f"{source} says {algorithm} {says}, the download hashes to {got[algorithm]}"
                 findings.append(Finding("mismatch", name, message))
-        if "signed_by" in entry:
+        if "signed_by" in entry:  # vendor_sums returned, so gpgv passed the signature over `source`
             findings.append(Finding("ok", name, f"signature of {source}"))
     return findings
