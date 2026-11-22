@@ -1,0 +1,36 @@
+{
+  "inputs": {
+    "alloy": {
+      "apt": "alloy",
+      "datasource": "deb",
+      "depName": "alloy",
+      "registryUrl": "https://apt.grafana.com?suite=stable&components=main&binaryArch=amd64",
+      "sha256": "29ca37327c02e30ff7cc3a1e0ff3779217f26092a1adc29ff4738f6a9e4370e3",
+      "signed_by": "grafana-apt-key",
+      "url": "https://apt.grafana.com/pool/main/a/alloy/alloy-{version}.amd64.deb",
+      "version": "1.22.0-1"
+    },
+    "grafana-apt-key": {
+      "description": "The key Grafana signs its apt repository with: a trust root, moved by hand.",
+      "sha256": "3d4029689bc7e4444ec00abafa07f21e9c812b41f1123ab5bbe6f8c3e3f7ff8c",
+      "url": "https://apt.grafana.com/gpg.key",
+      "version": "1"
+    },
+    "node": {
+      "datasource": "node-version",
+      "depName": "node",
+      "sha256": "5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864",
+      "signed_by": "node-release-keys",
+      "sums_url": "https://nodejs.org/dist/v{version}/SHASUMS256.txt.asc",
+      "url": "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.xz",
+      "version": "26.13.1"
+    },
+    "node-release-keys": {
+      "description": "The Node.js release keys: a trust root, moved by hand.",
+      "sha256": "140f2ad5260fd62773b6243ce8e1d3009645d558f121b8262c55e383dc285932",
+      "url": "https://raw.githubusercontent.com/nodejs/release-keys/{version}/gpg-only-active-keys/pubring.kbx",
+      "version": "481637f813e912c4aa3622d7964ab426c97b8e8d"
+    }
+  },
+  "schema": 1
+}

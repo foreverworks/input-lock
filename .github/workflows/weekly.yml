@@ -1,5 +1,6 @@
 # Once a week: the full matrix of supported Pythons, the next pre-release (allowed to fail: it warns
-# early, it never blocks), and the example lock's downloads, so a moved upstream file shows up here.
+# early, it never blocks), and the example locks' downloads and signatures, so a moved upstream file
+# or key shows up here.
 name: weekly
 
 on:
@@ -31,6 +32,9 @@ jobs:
           python-version: "3.16"
           allow-prereleases: true
 
+      - name: GnuPG, so no signature test is skipped
+        run: gpg --version && gpgv --version
+
       - name: Tests
         run: python -m unittest discover -s tests -t . -v
 
@@ -49,3 +53,9 @@ jobs:
           python3 -I bin/input-lock verify --lock examples/lock.json --entry jq --entry shellcheck
           python3 -I bin/input-lock refresh --lock examples/lock.json --entry alloy
           git diff --exit-code examples/lock.json
+
+      - name: The signed example, against Node.js's and Grafana's own signatures (no package download)
+        run: |
+          python3 -I bin/input-lock verify --lock examples/signed.json --entry node-release-keys --entry grafana-apt-key
+          python3 -I bin/input-lock refresh --lock examples/signed.json --entry node --entry alloy
+          git diff --exit-code examples/signed.json

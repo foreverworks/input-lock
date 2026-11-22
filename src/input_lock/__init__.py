@@ -5,8 +5,9 @@ The library's public surface, for a build tool that reads the lock instead of re
     from input_lock import parse, render_url, build_env, input_identity
 
 `input_lock.lock` is the format, `input_lock.identity` the input identity, `input_lock.records`
-the provenance, SBOM and test-result records, `input_lock.deb` a vendor's Packages index, and
-`input_lock.fetch` the network. Python standard library only.
+the provenance, SBOM and test-result records, `input_lock.deb` a vendor's apt repository,
+`input_lock.signed` what a vendor signed, and `input_lock.fetch` the network and gpgv. Python
+standard library only.
 """
 
 __version__ = "0.1.0"
@@ -19,6 +20,7 @@ from .lock import (
     NOT_BUILD_FIELDS,
     SCHEMA,
     SNAPSHOT_ID,
+    TRUST,
     Entry,
     JsonValue,
     Lock,
@@ -50,6 +52,7 @@ __all__ = [
     "NOT_BUILD_FIELDS",
     "SCHEMA",
     "SNAPSHOT_ID",
+    "TRUST",
     "Entry",
     "JsonValue",
     "Lock",

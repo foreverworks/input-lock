@@ -6,9 +6,11 @@ import re
 import shlex
 import unittest
 
+from input_lock import identity
 from input_lock.lock import (
     Lock,
     LockError,
+    Value,
     build_env,
     build_fields,
     dump,
@@ -173,6 +175,77 @@ class Checks(unittest.TestCase):
 
     def test_extension_fields_are_allowed(self) -> None:
         self.assertEqual(found(self.lock(tool=self.entry(build="17", workload_set="10.0.402.1", module=None))), "")
+
+
+def an_entry(**fields: object) -> dict[str, object]:
+    return {"version": "1.2.3", "url": "https://example.com/t-{version}.tgz", "sha256": HEX, **fields}
+
+
+def a_lock(**entries: object) -> dict[str, object]:
+    return {"inputs": entries}
+
+
+class Trust(unittest.TestCase):
+    def keys(self) -> dict[str, object]:
+        return an_entry(version="1", url="https://example.com/keys.gpg")
+
+    def test_a_signed_entry_passes(self) -> None:
+        signed = an_entry(signed_by="keys", sums_url="https://example.com/{version}/SHA256SUMS.asc")
+        detached = an_entry(
+            signed_by="keys", sums_url="https://example.com/SUMS", sums_sig_url="https://example.com/SUMS.sig"
+        )
+        apt = an_entry(
+            apt="pkg",
+            datasource="deb",
+            depName="pkg",
+            registryUrl="https://apt.example.com?suite=s&components=main",
+            url="https://apt.example.com/pkg_{version}.deb",
+            signed_by="keys",
+        )
+        self.assertEqual(found(a_lock(tool=signed, other=detached, pkg=apt, keys=self.keys())), "")
+
+    def test_the_signed_example_passes(self) -> None:
+        lock = parse((ROOT / "examples" / "signed.json").read_text(encoding="utf-8"))
+        self.assertEqual(lock["inputs"]["node"]["signed_by"], "node-release-keys")
+
+    def test_each_rule(self) -> None:
+        sums = "https://example.com/SUMS.asc"
+        cases = {
+            "not an entry of this lock": a_lock(tool=an_entry(signed_by="nobody", sums_url=sums)),
+            "signed_by itself": a_lock(keys=an_entry(signed_by="keys", sums_url=sums)),
+            "signed_by names an entry": a_lock(tool=an_entry(signed_by="Keys!", sums_url=sums), keys=self.keys()),
+            "needs a sums_url": a_lock(tool=an_entry(signed_by="keys"), keys=self.keys()),
+            "so it needs signed_by": a_lock(tool=an_entry(sums_url=sums)),
+            "which the entry does not have": a_lock(
+                tool=an_entry(signed_by="keys", sums_sig_url=sums + ".sig"), keys=self.keys()
+            ),
+            "sums_url is not https": a_lock(
+                tool=an_entry(signed_by="keys", sums_url="http://example.com/SUMS.asc"), keys=self.keys()
+            ),
+            "sums_url names {build}": a_lock(
+                tool=an_entry(signed_by="keys", sums_url="https://example.com/{build}/SUMS"), keys=self.keys()
+            ),
+            "takes no sums_url": a_lock(tool=an_entry(apt="tool", signed_by="keys", sums_url=sums), keys=self.keys()),
+            "pinned by its checksum alone": a_lock(
+                tool=an_entry(signed_by="keys", sums_url=sums),
+                keys=an_entry(signed_by="tool", sums_url=sums),
+            ),
+            "must be a string": a_lock(tool=an_entry(signed_by=["keys"]), keys=self.keys()),
+        }
+        for needle, data in cases.items():
+            with self.subTest(needle=needle):
+                self.assertIn(needle, found(data))
+
+    def test_the_trust_stays_out_of_what_a_build_reads(self) -> None:
+        plain: dict[str, Value] = {"version": "1", "url": "https://example.com/t", "sha256": HEX}
+        signed: dict[str, Value] = {
+            **plain,
+            "signed_by": "keys",
+            "sums_url": "https://example.com/S",
+            "sums_sig_url": "x",
+        }
+        self.assertEqual(build_fields(signed), build_fields(plain))
+        self.assertEqual(identity.input_identity([], {"t": signed}), identity.input_identity([], {"t": plain}))
 
 
 class Urls(unittest.TestCase):

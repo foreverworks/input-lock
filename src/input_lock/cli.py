@@ -133,9 +133,10 @@ def cmd_identity(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     lock = read_lock(args.lock)
     bad = 0
+    keyrings: dict[str, bytes] = {}
     for name, entry in selected(lock, None, args.entry).items():
         try:
-            findings = fetch.verify(name, entry)
+            findings = fetch.verify(name, entry, fetch.keyring_for(lock, entry, keyrings))
         except fetch.ERRORS as error:  # report every entry, not just the first that fails
             findings = [fetch.Finding("error", name, str(error))]
         for finding in findings:
@@ -162,9 +163,11 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     computed: dict[str, dict[str, str]] = {}
     sources: dict[str, str] = {}
     failed = 0
+    keyrings: dict[str, bytes] = {}
     for name in names:
-        try:
-            computed[name], sources[name] = fetch.checksums_for(lock["inputs"][name])
+        entry = lock["inputs"][name]
+        try:  # a keyring is read as the lock pins it now: one this bump moved must carry its new checksum already
+            computed[name], sources[name] = fetch.checksums_for(entry, fetch.keyring_for(lock, entry, keyrings))
         except fetch.ERRORS as error:
             print(f"error    {name}: {error}", file=sys.stderr)
             failed += 1

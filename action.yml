@@ -1,7 +1,8 @@
 name: input-lock checksums
 description: >-
   On a push to a Renovate branch, rewrite the checksum of every lock entry whose version moved
-  (from the download, or from the vendor's Packages index for a .deb) and commit it to that branch.
+  (from the download, from the vendor's Packages index for a .deb, or from the vendor's signed
+  checksum list for an entry with signed_by) and commit it to that branch.
   The lock must already be in its own form (input-lock format).
 author: foreverworks
 branding:

@@ -245,6 +245,9 @@ reaches the lock.
 }
 ```
 
+[examples/signed.json](examples/signed.json) has this pair, and Grafana's apt repository signed
+the same way; a weekly CI run checks both against the vendors' own signatures.
+
 - **`signed_by`** names another entry of the same lock: the vendor's public keys, an ordinary
   download pinned by its checksum. A key change is therefore a diff someone reviews, never
   something a server decides. The keyring entry carries no `signed_by` of its own and is moved by

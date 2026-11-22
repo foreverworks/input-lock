@@ -249,3 +249,5 @@ Everything above is a function in `input_lock`, typed and standard library only:
 | `input_identity(...)`, `files_digest(files)`, `lock_digest(lock)`, `digest(value)`, `canonical(value)` | identities and digests |
 | `input_lock.records` | in-toto statements, SLSA provenance v1, SPDX 2.3, test results, DSSE envelopes |
 | `input_lock.deb`, `input_lock.fetch`, `input_lock.refresh` | a vendor's index, the network, and the refresh plan |
+| `fetch.keyring_for(lock, entry)`, `fetch.checksums_for(entry, ring)`, `fetch.verify(name, entry, ring)` | a `signed_by` entry's keyring, then its checksums or its verification, signature checked |
+| `input_lock.signed` | gpgv's verdict, one clear-signed message, armor, a checksum list: the pure half of the signature check |

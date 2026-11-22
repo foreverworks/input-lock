@@ -57,14 +57,20 @@ HINTS: Final = ("datasource", "depName", "packageName", "extractVersion", "versi
 BOOKKEEPING: Final = ("used_by", "description")
 """Fields about the entry, for people and for the consumer's own wiring. A build never reads them."""
 
-NOT_BUILD_FIELDS: Final = frozenset((*HINTS, *BOOKKEEPING))
+TRUST: Final = ("signed_by", "sums_url", "sums_sig_url")
+"""How the checksum is vouched for: the keyring entry the vendor signs with, and its signed checksum list.
+A build never reads them: the checksum they vouch for is what counts."""
+
+NOT_BUILD_FIELDS: Final = frozenset((*HINTS, *BOOKKEEPING, *TRUST))
 """The deny-list: the fields that stay out of `build_fields`, so out of identities and build.env."""
 
 DERIVED: Final = ("version_noepoch", "version_underscore", "version_urlquoted", "major")
 """Placeholders a url template may use that the version derives; no entry may define them."""
 
 TOP_LEVEL: Final = ("schema", "debian_snapshot", "inputs")
-STRING_FIELDS: Final = frozenset(("version", "url", "apt", "description", *HINTS, *CHECKSUMS))
+STRING_FIELDS: Final = frozenset(("version", "url", "apt", "description", *HINTS, *CHECKSUMS, *TRUST))
+TEMPLATES: Final = ("url", "sums_url", "sums_sig_url")
+"""The fields that are url templates: rendered from the entry's placeholders, https only."""
 NAME: Final = re.compile(r"[a-z0-9][a-z0-9-]*")
 FIELD: Final = re.compile(r"[a-z][a-z0-9_]*")
 PLACEHOLDER: Final = re.compile(r"\{([a-z][a-z0-9_]*)\}")
@@ -159,14 +165,21 @@ def render_url(entry: Entry) -> str:
     """The entry's download URL: its `url` template with every {placeholder} filled.
 
     Raises ValueError for a placeholder the entry does not have."""
+    return render(entry, "url")
+
+
+def render(entry: Entry, field: str) -> str:
+    """A url template field of the entry (`url`, `sums_url`, `sums_sig_url`) with every {placeholder} filled.
+
+    Raises ValueError for a placeholder the entry does not have."""
     values = placeholders(entry)
 
     def one(match: re.Match[str]) -> str:
         if match.group(1) not in values:
-            raise ValueError(f"url names {{{match.group(1)}}}, which the entry does not have")
+            raise ValueError(f"{field} names {{{match.group(1)}}}, which the entry does not have")
         return values[match.group(1)]
 
-    return PLACEHOLDER.sub(one, text(entry, "url"))
+    return PLACEHOLDER.sub(one, text(entry, field))
 
 
 def checksums(entry: Entry) -> dict[str, str]:
@@ -274,6 +287,7 @@ def problems(data: JsonValue, images: Iterable[str] | None = None) -> list[str]:
         if not mistakes:
             good[name] = cast(Entry, entry)
     found.extend(across_entries(good))
+    found.extend(keyring_problems(good, frozenset(inputs)))
     return found
 
 
@@ -321,6 +335,7 @@ def entry_problems(name: str, raw: JsonValue, images: frozenset[str] | None = No
             found.append(f"{where}.{algorithm} is not {CHECKSUMS[algorithm]} lowercase hex digits")
     found.extend(used_by_problems(where, entry, images))
     found.extend(renovate_problems(where, entry))
+    found.extend(trust_problems(where, name, entry))
     return found
 
 
@@ -337,6 +352,52 @@ def url_problems(where: str, entry: Entry) -> list[str]:
     template = text(entry, "url")
     if "datasource" in entry and "{version" not in template and "{major}" not in template:
         found.append(f"{where}: Renovate moves its version, so its url must be built from it ({{version}}, ...)")
+    return found
+
+
+def trust_problems(where: str, name: str, entry: Entry) -> list[str]:
+    """signed_by, sums_url and sums_sig_url fit together: what the entry alone can say."""
+    found: list[str] = []
+    signer = text(entry, "signed_by")
+    if "signed_by" in entry and not NAME.fullmatch(signer):
+        found.append(f"{where}.signed_by names an entry: lowercase letters, digits and dashes")
+    if signer == name:
+        found.append(f"{where}: an entry cannot be signed_by itself")
+    if "sums_url" in entry and "signed_by" not in entry:
+        found.append(f"{where}: sums_url is a signed checksum list, so it needs signed_by")
+    if "sums_sig_url" in entry and "sums_url" not in entry:
+        found.append(f"{where}: sums_sig_url is the signature of a sums_url, which the entry does not have")
+    if "signed_by" in entry and "apt" in entry and "sums_url" in entry:
+        found.append(f"{where}: an apt entry's signed list is its repository's InRelease, so it takes no sums_url")
+    if "signed_by" in entry and "apt" not in entry and "sums_url" not in entry:
+        found.append(f"{where}: signed_by needs a sums_url, the vendor's signed checksum list (apt entries need none)")
+    for field in ("sums_url", "sums_sig_url"):
+        if field not in entry:
+            continue
+        try:
+            url = render(entry, field)
+        except ValueError as error:
+            found.append(f"{where}: {error}")
+            continue
+        if not url.startswith(URL_SCHEMES):
+            found.append(f"{where}: {field} is not https")
+    return found
+
+
+def keyring_problems(entries: Mapping[str, Entry], names: frozenset[str]) -> list[str]:
+    """Every signed_by names an entry of the lock, a keyring that is not signed itself and is no .deb."""
+    found: list[str] = []
+    for name, entry in sorted(entries.items()):
+        signer = text(entry, "signed_by")
+        if not signer:
+            continue
+        if signer not in names:
+            found.append(f"inputs.{name}.signed_by names {signer}, which is not an entry of this lock")
+        elif signer in entries and ("signed_by" in entries[signer] or "apt" in entries[signer]):
+            found.append(
+                f"inputs.{name}.signed_by names {signer}, which is a trust root only when it is pinned by its "
+                "checksum alone (no signed_by, no apt)"
+            )
     return found
 
 

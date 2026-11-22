@@ -46,6 +46,9 @@ jobs:
       - name: Shell
         run: shellcheck src/input_lock/lock.sh scripts/build-pyz
 
+      - name: GnuPG, so no signature test is skipped
+        run: gpg --version && gpgv --version
+
       - name: Tests
         run: python -m unittest discover -s tests -t . -v
 
@@ -53,6 +56,7 @@ jobs:
         run: |
           scripts/build-pyz
           python3 dist/input-lock-*.pyz check --lock examples/lock.json
+          python3 dist/input-lock-*.pyz check --lock examples/signed.json
 
       - name: A real bump for the Action (jq 1.8.2 back to 1.8.1)
         run: |
