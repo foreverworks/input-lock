@@ -59,11 +59,11 @@ regex manager and a three-line script are enough.
 **1. Install.** One file, any Python 3.13 or newer:
 
 ```sh
-curl -fsSLO https://github.com/foreverworks/input-lock/releases/download/v0.1.0/input-lock-0.1.0.pyz
-python3 input-lock-0.1.0.pyz --version
+curl -fsSLO https://github.com/foreverworks/input-lock/releases/download/v0.2.0/input-lock-0.2.0.pyz
+python3 input-lock-0.2.0.pyz --version
 ```
 
-or `pip install git+https://github.com/foreverworks/input-lock@v0.1.0`, which installs the
+or `pip install git+https://github.com/foreverworks/input-lock@v0.2.0`, which installs the
 `input-lock` command and the `input_lock` library.
 
 **2. Write a lock.** Save this as `lock.json` ([examples/lock.json](examples/lock.json)): jq and
@@ -146,7 +146,7 @@ lock_fetch shellcheck /tmp/shellcheck.tar.xz
 
 ```json
 {
-  "extends": ["config:recommended", "github>foreverworks/input-lock#v0.1.0"]
+  "extends": ["config:recommended", "github>foreverworks/input-lock#v0.2.0"]
 }
 ```
 
@@ -170,7 +170,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0        # the Action compares the branch with its merge base
-      - uses: foreverworks/input-lock@<commit sha of v0.1.0> # v0.1.0
+      - uses: foreverworks/input-lock@<commit sha of v0.2.0> # v0.2.0
 ```
 
 A few minutes after Renovate's push, a second commit on the branch carries the new checksums,
@@ -309,7 +309,7 @@ that changes it says so:
 | `build_env(lock, image=None, snapshot=True)`, `shell(pairs)` | a build.env; `snapshot=False` leaves `LOCK_DEBIAN_SNAPSHOT` out, for an environment (a hook's) that must not see the build snapshot |
 | `input_identity(...)`, `files_digest(files)`, `lock_digest(lock)`, `digest(value)`, `canonical(value)` | identities and digests |
 | `SNAPSHOT_ID` | the pattern of a snapshot.debian.org ID, for a field of your own that holds one |
-| `SCHEMA`, `CHECKSUMS`, `HINTS`, `BOOKKEEPING`, `NOT_BUILD_FIELDS` | the format's constants |
+| `SCHEMA`, `CHECKSUMS`, `HINTS`, `BOOKKEEPING`, `TRUST`, `NOT_BUILD_FIELDS` | the format's constants |
 | `Lock`, `Entry`, `Value`, `JsonValue`, `LockError`, `Package` | the types |
 
 The modules `input_lock.records` (the records above), `input_lock.fetch` (the network),
@@ -337,7 +337,9 @@ Commands (`--lock <file>` on each, default `lock.json`, `-` for stdin):
 
 ## Status
 
-Version 0.1.0, the first release. The lock format is schema 1 and is meant to stay readable by
+Version 0.2.0. It adds signed checksums (`signed_by`, `sums_url`, `sums_sig_url`), `env
+--no-snapshot` and `build_env(..., snapshot=False)`, and makes `SNAPSHOT_ID`, `entry_problems`,
+`entry_env` and `TRUST` public. The lock format is still schema 1 and is meant to stay readable by
 every later release; a lock from a newer schema fails with a clear message instead of a guess.
 The library and commands may still change before 1.0, and the release notes on GitHub will say how.
 

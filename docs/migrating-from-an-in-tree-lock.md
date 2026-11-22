@@ -85,7 +85,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: foreverworks/input-lock@<commit sha of the release> # v0.1.0
+      - uses: foreverworks/input-lock@<commit sha of the release> # v0.2.0
         with:
           lock: path/to/lock.json
 ```
@@ -103,7 +103,7 @@ In `renovate.json`, delete your `customType: "jsonata"` manager for the lock and
 
 ```json
 {
-  "extends": ["github>foreverworks/input-lock#v0.1.0"]
+  "extends": ["github>foreverworks/input-lock#v0.2.0"]
 }
 ```
 
@@ -131,9 +131,9 @@ The tool your build trusts with its downloads is a download too. Give it an entr
   "datasource": "github-releases",
   "depName": "foreverworks/input-lock",
   "extractVersion": "^v(?<version>.+)$",
-  "sha256": "<sha256 of input-lock-0.1.0.pyz>",
+  "sha256": "<sha256 of input-lock-0.2.0.pyz>",
   "url": "https://github.com/foreverworks/input-lock/releases/download/v{version}/input-lock-{version}.pyz",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
 ```
 
