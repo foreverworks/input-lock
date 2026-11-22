@@ -52,6 +52,8 @@ appears twice in one object (JSON would keep the last one and drop an entry with
 | `module` | no | A name for what installs this input in your build, or `null`. Any name: your own checks decide which are valid. |
 | `used_by` | no | A sorted list of distinct names: the images, jobs or machines that install this input. `check --image <name>` (repeated) restricts the names. |
 | `description` | no | A note for people. JSON has no comments; this is where one goes. |
+| `signed_by` | no | The name of another entry: the keyring the vendor signs with. Its checksum is then taken from what the vendor signed, never from HTTPS alone (below). |
+| `sums_url`, `sums_sig_url` | no | For a `signed_by` entry that is not an apt one: a URL template of the vendor's checksum list, clear-signed, or signed by the detached signature at `sums_sig_url`. Both `https://`. |
 | anything else | no | Your own field: a lowercase name (letters, digits, `_`) and a string value. A build may read it, a URL may name it, and it counts in the identity. |
 
 A field named after a derived placeholder (`major`, `version_noepoch`, ...) is refused, as is any
@@ -91,7 +93,53 @@ Renovate's `deb` datasource finds new versions in the repository `registryUrl` n
 plain, `.gz` or `.xz`) and takes the checksum it publishes for the new version, without
 downloading the package; it checks that the index's file name is the one the URL downloads. An
 index that does not list the version, or lists a checksum that is not a hex digest, fails the run.
-The index is read over HTTPS and is not signature-checked: the vendor's TLS is the trust here.
+Without `signed_by` the index is read over HTTPS and is not signature-checked: the vendor's TLS
+is the trust. With it, the index counts only when its sha256 is the one the repository's signed
+`InRelease` (or `Release` and `Release.gpg`) lists, below.
+
+### Signed checksums: `signed_by`
+
+```json
+"alloy": {
+  "apt": "alloy",
+  ...
+  "signed_by": "grafana-apt-key"
+},
+"grafana-apt-key": {
+  "description": "The key Grafana signs its apt repository with: a trust root, moved by hand.",
+  "sha256": "<sha256 of gpg.key>",
+  "url": "https://apt.grafana.com/gpg.key",
+  "version": "1"
+}
+```
+
+`signed_by` names the entry that pins the vendor's OpenPGP public keys, as apt's own `Signed-By`
+does. `refresh` and `verify` download that keyring, check it against its checksums in the lock
+(a mismatch fails: a keyring is moved by hand, its checksum with it), unwrap it if it is
+ASCII-armored, and hand it to `gpgv`:
+
+| Entry | What is signed | What is checked |
+|---|---|---|
+| apt (`apt` set) | `<repository>/dists/<suite>/InRelease`, or `Release` with `Release.gpg` | the signature; `Suite` or `Codename` is the `registryUrl`'s suite; `Valid-Until`, when present, is in the future; the `Packages` index read (plain, `.gz` or `.xz`) has the sha256 the signed file lists for it |
+| any other | the list at `sums_url`, clear-signed, or with the detached signature at `sums_sig_url` | the signature; exactly one line names the entry's file, `<hex>  <name>` or `<hex> *<name>`, where the name is the url's path relative to the list's folder (or its file name, for a url elsewhere); the hex's length says its algorithm (64 sha256, 128 sha512, 40 sha1) |
+
+A signature passes when `gpgv --status-fd` reports `VALIDSIG` and no `BADSIG`, `EXPSIG`,
+`EXPKEYSIG`, `REVKEYSIG` or `ERRSIG`, and `gpgv` exits 0. Only the text `gpgv` writes out as
+signed is read. A clear-signed file must be one signed message and nothing else, so text around it
+cannot pose as signed. Without `gpgv` on the PATH, a `signed_by` entry fails `refresh` and
+`verify` with a message naming it; nothing falls back to HTTPS.
+
+The rules `check` applies, offline:
+
+- `signed_by` names another entry of the lock, which has no `signed_by` and no `apt` itself.
+- An entry with `signed_by` that is not an apt one has a `sums_url`; an apt entry has none.
+- `sums_url` and `sums_sig_url` need `signed_by` (and `sums_sig_url` a `sums_url`), render from the
+  entry's fields as `url` does, and are `https://`.
+
+`signed_by`, `sums_url` and `sums_sig_url` stay out of build.env and the identity: they say how a
+checksum was vouched for, and the checksum, which counts, says what the bytes are. input-lock 0.1.0
+reads them as fields of your own and checks no signature, so a lock that relies on them needs
+0.2.0 or later.
 
 ### What a checksum vouches for
 
@@ -103,6 +151,10 @@ commit as trust on first use: the bump itself (the release, its notes, its signa
 one) is what gets reviewed, and the checksum commit adds nothing to it. An apt entry has one more
 source: its sha256 is the one the vendor publishes in its index, not a hash of a download.
 
+An entry with `signed_by` is the exception: its checksum is the one the vendor signed, checked
+against a keyring the lock pins, so the checksum commit then vouches for what the vendor
+published, as far as the vendor's key does.
+
 ## Rules between entries
 
 - One entry per `apt` package name.
@@ -112,8 +164,8 @@ source: its sha256 is the one the vendor publishes in its index, not a hash of a
 ## What a build reads: `build_fields` and build.env
 
 The fields a build reads are every field except Renovate's lookup (`datasource`, `depName`,
-`packageName`, `extractVersion`, `versioning`, `registryUrl`) and the bookkeeping (`used_by`,
-`description`), with `url` rendered. `input-lock env [--image <name>]` exports exactly those, as
+`packageName`, `extractVersion`, `versioning`, `registryUrl`), the bookkeeping (`used_by`,
+`description`) and the trust (`signed_by`, `sums_url`, `sums_sig_url`), with `url` rendered. `input-lock env [--image <name>]` exports exactly those, as
 shell-quoted `KEY=value` lines:
 
 ```sh
@@ -157,7 +209,7 @@ snapshot without listing its packages should add the snapshot to its cache key i
 
 | Moves the identity | Leaves it alone |
 |---|---|
-| `version`, the rendered `url`, every checksum, `apt`, `module`, and every field of your own | `datasource`, `depName`, `packageName`, `extractVersion`, `versioning`, `registryUrl`, `used_by`, `description` |
+| `version`, the rendered `url`, every checksum, `apt`, `module`, and every field of your own | `datasource`, `depName`, `packageName`, `extractVersion`, `versioning`, `registryUrl`, `used_by`, `description`, `signed_by`, `sums_url`, `sums_sig_url` |
 
 It is a deny-list on purpose. The fields that stay out are known not to change the bytes a build
 makes: how Renovate looks for the next version, which other images use the entry, a note. Every

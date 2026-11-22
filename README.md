@@ -205,13 +205,13 @@ identity = input_identity(
 
 The identity is the sha256 of a canonical JSON document of those four things. From each lock
 entry it takes every field **except** Renovate's lookup (`datasource`, `depName`, `packageName`,
-`extractVersion`, `versioning`, `registryUrl`) and the bookkeeping (`used_by`, `description`),
-with the URL rendered. So:
+`extractVersion`, `versioning`, `registryUrl`), the bookkeeping (`used_by`, `description`) and
+the trust (`signed_by`, `sums_url`, `sums_sig_url`), with the URL rendered. So:
 
 | You change | The identity |
 |---|---|
 | a version, a URL, a checksum, `apt`, `module`, any field of your own | moves |
-| how Renovate looks up versions, which images use an entry, a description | stays |
+| how Renovate looks up versions, which images use an entry, a description, how a checksum is vouched for (`signed_by`, `sums_url`, `sums_sig_url`) | stays |
 | the order of keys, entries or packages, the file's layout | stays |
 
 It is a deny-list by design: a field the library does not know might change what a build makes,
@@ -219,6 +219,68 @@ so it counts, and a forgotten field means one rebuild too many, never a stale ar
 `input-lock identity --image builder` prints it for the lock part alone, ready for a cache key
 (add `debian_snapshot` to the key yourself if the job installs from it).
 The full definition is in [docs/format.md](docs/format.md#the-input-identity).
+
+## Signed checksums from the vendor
+
+By default a checksum is trust on first use: the hash of what HTTPS served when the version moved
+(see Known limits). Many vendors sign what they publish, and an entry can ask for that signature
+to be checked instead, so a checksum comes from the vendor's own signed list and nothing unsigned
+reaches the lock.
+
+```json
+"node": {
+  "datasource": "node-version",
+  "depName": "node",
+  "sha256": "5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864",
+  "signed_by": "node-release-keys",
+  "sums_url": "https://nodejs.org/dist/v{version}/SHASUMS256.txt.asc",
+  "url": "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.xz",
+  "version": "26.13.1"
+},
+"node-release-keys": {
+  "description": "The Node.js release keys: a trust root, moved by hand.",
+  "sha256": "140f2ad5260fd62773b6243ce8e1d3009645d558f121b8262c55e383dc285932",
+  "url": "https://raw.githubusercontent.com/nodejs/release-keys/{version}/gpg-only-active-keys/pubring.kbx",
+  "version": "481637f813e912c4aa3622d7964ab426c97b8e8d"
+}
+```
+
+- **`signed_by`** names another entry of the same lock: the vendor's public keys, an ordinary
+  download pinned by its checksum. A key change is therefore a diff someone reviews, never
+  something a server decides. The keyring entry carries no `signed_by` of its own and is moved by
+  hand, with its new checksum written in the same change.
+- **An apt entry** needs nothing more. `refresh` and `verify` read the repository's `InRelease`
+  (or `Release` with `Release.gpg`), check its signature, check that it is the suite the
+  `registryUrl` names and that it is not past its `Valid-Until`, and accept the `Packages` index
+  only when its sha256 is the one that signed file lists.
+- **Any other entry** names the vendor's signed checksum list in **`sums_url`**, a URL template
+  like `url`, in `sha256sum` form (`<hex>  <file>`): clear-signed, as Node.js's
+  `SHASUMS256.txt.asc` is, or with **`sums_sig_url`** for a detached signature, as HashiCorp's
+  `_SHA256SUMS.sig` is. `refresh` takes the checksum from the line that names the entry's file,
+  without a download; when the entry also carries an algorithm the list lacks, the download is
+  hashed and must agree with the list.
+
+The signature is checked by `gpgv`, GnuPG's verify-only tool (Debian's `gpgv` package; GitHub's
+Ubuntu runners have it). input-lock carries no OpenPGP code and adds no dependency: when an entry
+has `signed_by` and `gpgv` is not installed, `refresh` and `verify` fail for that entry, naming
+the missing tool, rather than fall back to trusting HTTPS. A signature passes when `gpgv` exits 0
+and reports a valid signature by a key of the pinned keyring, and no bad, expired or revoked one.
+Only the text `gpgv` says is signed is read; a clear-signed file with anything around its one
+signed message is refused. The keyring may be binary (a `.gpg` keyring or a `.kbx` keybox) or
+ASCII-armored (a vendor's `gpg.key`), which input-lock unwraps first.
+
+`check` needs no `gpgv` and no network: it checks that the fields fit together (`signed_by` names
+an entry, `sums_url` and `sums_sig_url` are https templates, an apt entry takes no `sums_url`).
+These fields say how a checksum was vouched for, not what a build downloads, so like Renovate's
+hints they stay out of build.env and the input identity.
+
+Which vendors this reaches: every apt repository signs its `Release` (the `deb` datasource), and
+so do Node.js (`node-version`) and many projects that attach a signed `SHA256SUMS` to their GitHub
+releases (`github-releases`). The npm registry's signatures and Sigstore attestations are not
+OpenPGP and are not covered; such entries stay trust on first use.
+
+input-lock 0.1.0 reads these fields as fields of your own: it checks no signature and counts them
+in the identity. Pin 0.2.0 or later wherever the check matters.
 
 ## Records
 
@@ -278,12 +340,12 @@ The library and commands may still change before 1.0, and the release notes on G
 
 Known limits:
 
-- **The checksum is trust on first use.** For an entry that is not an apt one, the checksum is the
-  hash of whatever its URL serves when the version is bumped. Nothing is cross-checked against a
-  checksum the upstream publishes, so review the checksum commit as you would any new dependency
-  (the release, its notes, its signature if it has one), not as a proof.
-- A vendor's `Packages` index (an apt entry's checksum) is trusted over HTTPS, not checked against
-  the vendor's signing key.
+- **Without `signed_by`, the checksum is trust on first use.** For an entry that is not an apt
+  one, the checksum is the hash of whatever its URL serves when the version is bumped, so review
+  the checksum commit as you would any new dependency (the release, its notes, its signature if it
+  has one), not as a proof. An apt entry's checksum comes from its vendor's `Packages` index, read
+  over HTTPS and not checked against the vendor's key. Give the entry a `signed_by` where the
+  vendor signs (above).
 - One entry pins one file for one architecture (several architectures per entry would be schema 2).
 - Every push runs the tests on the newest stable Python and checks types and lint against 3.13,
   the oldest supported (Debian 13's); every supported version runs weekly and before each release.
