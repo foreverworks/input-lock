@@ -85,7 +85,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: foreverworks/input-lock@<commit sha of the release> # v0.2.0
+      - uses: foreverworks/input-lock@d2234a6d93e4e5dcf7b5472335e6acc4c2ac9777 # v0.2.0
         with:
           lock: path/to/lock.json
 ```

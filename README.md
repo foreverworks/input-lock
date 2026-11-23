@@ -10,7 +10,10 @@ only when it has.
 For teams that build images or CI environments from tarballs, binaries and vendor `.deb`s that no
 package manager pins for them.
 
-Python standard library only. Typed. MIT.
+You need Python 3.13 or newer to run it, and nothing to install beyond that: it uses only the standard
+library, and it is free (MIT). The download helpers in `lock.sh` need bash, curl and coreutils. The
+Action and the Renovate preset need a GitHub repository with Renovate. Checking a vendor's signature
+(see "Signed checksums") also needs `gpgv`.
 
 ## The problem
 
@@ -23,10 +26,10 @@ shell script, a checksum in a YAML file three directories away. Then:
   sha256 of the file that version downloads. Every bump is a pull request that fails its own build,
   or a checksum someone copies from a web page and hopes.
 - **Nobody can say what a build really used.** Which exact files went into last Tuesday's image?
-  Did this rebuild change anything, or did it just run again? Without one record of the inputs,
+  Did this rebuild change anything, or did it only run again? Without one record of the inputs,
   the answer is archaeology.
 
-## Why not just Renovate regex managers plus a script?
+## Why not Renovate regex managers plus a script?
 
 You can: a regex manager moves a version, and a script of yours recomputes the checksum. Then the
 version sits in one file, the URL in another and the checksum behind a script you now maintain,
@@ -64,7 +67,8 @@ python3 input-lock-0.2.0.pyz --version
 ```
 
 or `pip install git+https://github.com/foreverworks/input-lock@v0.2.0`, which installs the
-`input-lock` command and the `input_lock` library.
+`input-lock` command and the `input_lock` library. The commands below say `input-lock`; with the
+`.pyz`, run `python3 input-lock-0.2.0.pyz` in its place.
 
 **2. Write a lock.** Save this as `lock.json` ([examples/lock.json](examples/lock.json)): jq and
 ShellCheck from their GitHub releases, and Grafana Alloy from Grafana's apt repository. It is
@@ -170,7 +174,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0        # the Action compares the branch with its merge base
-      - uses: foreverworks/input-lock@<commit sha of v0.2.0> # v0.2.0
+      - uses: foreverworks/input-lock@d2234a6d93e4e5dcf7b5472335e6acc4c2ac9777 # v0.2.0
 ```
 
 A few minutes after Renovate's push, a second commit on the branch carries the new checksums,
@@ -311,14 +315,14 @@ that changes it says so:
 
 | Name | Does |
 |---|---|
-| `parse(text, images=None)`, `loads(text)`, `dump(lock)`, `schema_of(data)` | read, check and write the file |
+| `parse(text, images=None)`, `loads(text)`, `dump(lock)`, `schema_of(data)`, `schema_needed(data)` | read, check and write the file; the schema a lock has, and the lowest one that can hold it |
 | `problems(data, images=None)`, `entry_problems(name, entry, images=None)` | every problem of a lock, or of one entry, as a sentence, for your own checks to extend |
 | `render_url(entry)`, `placeholders(entry)`, `checksums(entry)`, `used_by(entry)` | what an entry says |
 | `build_fields(entry)`, `entries_for(lock, image)`, `entry_env(name, entry)`, `env_name(name)` | what a build reads |
 | `build_env(lock, image=None, snapshot=True)`, `shell(pairs)` | a build.env; `snapshot=False` leaves `LOCK_DEBIAN_SNAPSHOT` out, for an environment (a hook's) that must not see the build snapshot |
 | `input_identity(...)`, `files_digest(files)`, `lock_digest(lock)`, `digest(value)`, `canonical(value)` | identities and digests |
 | `SNAPSHOT_ID` | the pattern of a snapshot.debian.org ID, for a field of your own that holds one |
-| `SCHEMA`, `CHECKSUMS`, `HINTS`, `BOOKKEEPING`, `TRUST`, `NOT_BUILD_FIELDS` | the format's constants |
+| `SCHEMA`, `IDENTITY`, `CHECKSUMS`, `HINTS`, `BOOKKEEPING`, `TRUST`, `NOT_BUILD_FIELDS` | the format's constants: the highest schema read, the identity's tag, and the field lists |
 | `Lock`, `Entry`, `Value`, `JsonValue`, `LockError`, `Package` | the types |
 
 The modules `input_lock.records` (the records above), `input_lock.fetch` (the network),
@@ -344,6 +348,30 @@ Commands (`--lock <file>` on each, default `lock.json`, `-` for stdin):
 | `verify [--entry NAME]...` | download and compare every checksum |
 | `refresh --base REF \| --entry NAME...` | rewrite the checksums of moved (or named) entries; refuses a lock not in its own form |
 
+## When something fails
+
+Every message names the entry or file it is about. These are the ones people meet, and what to do:
+
+| You see | What it means, and what to do |
+|---|---|
+| ``not in its own form: run `input-lock format` first`` | `refresh` and the Action change checksums and nothing else, so they refuse a lock whose text is not what `format` writes. Run `input-lock format`, commit, and push again. |
+| `git merge-base origin/main HEAD: ... no common ancestor (a shallow checkout?...)` | The Action compares the branch with its merge base, which a shallow clone lacks. Give `actions/checkout` `fetch-depth: 0`. Locally, fetch the base branch first. |
+| `refresh needs --base <git ref> ... or --entry <name>` | Say which entries moved: `--base origin/main`, or name them with `--entry`. |
+| `error jq: HTTP Error 404: Not Found` | The URL built from the new version does not exist. Run `input-lock get jq` to see it, then check the version Renovate chose and the entry's `url` and `extractVersion`. |
+| `<name> <version> is not in <index url>` | A vendor's apt index does not list that version (yet), or the `registryUrl` is wrong. |
+| `nothing written, 1 of 3 moved entries failed` | `refresh` writes all of the checksums or none. Fix the entries named above it and run it again. |
+| `mismatch jq: sha256 of <url>` (from `verify`) | The file the URL serves is no longer the one the lock pins. Do not edit the checksum to make it pass: find out why the vendor's file changed. |
+| `<url> hashes to sha256 ..., <list> says ...` | The download disagrees with what the vendor's index or signed list publishes. Treat it as a failed check, not a typo. |
+| `gpgv is not installed, and this entry's signature must be checked` | An entry with `signed_by` needs `gpgv` (Debian and Ubuntu: `apt-get install gpgv`). input-lock never falls back to trusting HTTPS. |
+| `the keyring <url> does not match its sha256 in the lock` | The vendor changed its key file. Read the new key, and if you trust it, put its checksum in the lock in the same change. |
+| `the signature does not verify: ...` | gpgv rejected the signature: a key not in the pinned keyring, an expired or revoked key, or text that was changed. The message ends with what gpgv said. |
+| `this lock is schema 2, and this release ... reads schema 1 only: upgrade input-lock to read it` | The lock uses signed checksums, which input-lock 0.1.0 cannot read. Use 0.2.0 or newer. |
+| `lock: <entry> (<url>) is not the file the lock pins` (from `lock_fetch`) | The download's checksum differs from the lock. The build stops, and the bad file is removed. |
+| `lock: LOCK_JQ_URL is not set (is build.env sourced...)` | Source `build.env` before `lock.sh`, and make sure the entry's `used_by` lists the image you passed to `env --image`. |
+
+`input-lock check` prints one line per problem in the lock itself, each starting `inputs.<entry>`;
+[docs/format.md](docs/format.md) has the rule behind each.
+
 ## Status
 
 Version 0.2.0. It adds signed checksums (`signed_by`, `sums_url`, `sums_sig_url`), `env
@@ -363,9 +391,16 @@ Known limits:
   has one), not as a proof. An apt entry's checksum comes from its vendor's `Packages` index, read
   over HTTPS and not checked against the vendor's key. Give the entry a `signed_by` where the
   vendor signs (above).
-- One entry pins one file for one architecture (several architectures per entry would be schema 2).
+- One entry pins one file for one architecture (several architectures per entry would be schema 3).
 - Every push runs the tests on the newest stable Python and checks types and lint against 3.13,
   the oldest supported (Debian 13's); every supported version runs weekly and before each release.
+
+## Questions and bug reports
+
+Open an issue at https://github.com/foreverworks/input-lock/issues. Say the version
+(`input-lock --version`), the command you ran, the message you got, and, for a failed `refresh` or
+`verify`, the entry's lock text with any private URL taken out. For a security problem, please use
+the repository's private vulnerability reporting (Security tab) instead of a public issue.
 
 ## License
 

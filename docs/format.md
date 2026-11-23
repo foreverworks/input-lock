@@ -1,4 +1,4 @@
-# The lock format, schema 1
+# The lock format, schemas 1 and 2
 
 This is the reference for `lock.json`: every field, every rule `input-lock check` enforces, what a
 build reads from it, and how the input identity is computed. The README has the tour.
