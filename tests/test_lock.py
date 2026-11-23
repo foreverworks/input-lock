@@ -70,10 +70,10 @@ class Schema(unittest.TestCase):
 
     def test_a_future_schema_says_to_upgrade(self) -> None:
         with self.assertRaises(LockError) as caught:
-            parse('{"schema": 3, "inputs": {}}')
-        self.assertIn("schema 3", str(caught.exception))
+            parse('{"schema": 4, "inputs": {}}')
+        self.assertIn("schema 4", str(caught.exception))
         self.assertIn("upgrade input-lock", str(caught.exception))
-        self.assertEqual(len(problems({"schema": 3, "inputs": "anything"})), 1, "nothing else is judged")
+        self.assertEqual(len(problems({"schema": 4, "inputs": "anything"})), 1, "nothing else is judged")
 
     def test_signature_fields_need_schema_2(self) -> None:
         keys = an_entry(version="1", url="https://example.com/keys.gpg")
@@ -91,6 +91,23 @@ class Schema(unittest.TestCase):
         self.assertIn('"schema": 1', dump(plain), "and format lowers it to 1")
         self.assertNotIn("schema", dump({"inputs": {"keys": keys}}), "a lock without a schema gains none")
         self.assertEqual(schema_needed(json.loads(json.dumps(plain))), 1)
+
+    def test_snapshots_per_archive_need_schema_3(self) -> None:
+        both = {"debian": "20261123T084014Z", "debian-security": "20261123T141315Z"}
+        for schema in (None, 1, 2):
+            data: dict[str, object] = {"debian_snapshots": both, "inputs": {}}
+            if schema is not None:
+                data["schema"] = schema
+            with self.subTest(schema=schema):
+                self.assertIn('needs "schema": 3', found(data))
+                self.assertIn('"schema": 3', dump(data), "format writes the schema the lock needs")
+                self.assertEqual(found(json.loads(dump(data))), "")
+        signed = an_entry(signed_by="keys", sums_url="https://example.com/SUMS.asc")
+        keys = an_entry(version="1", url="https://example.com/keys.gpg")
+        shared: dict[str, object] = {"schema": 3, "inputs": {"tool": signed, "keys": keys}}
+        self.assertEqual(found(shared), "", "a schema-3 lock without them still reads")
+        self.assertIn('"schema": 2', dump(shared), "and format lowers it to what it needs")
+        self.assertIn('"schema": 1', dump({"schema": 3, "inputs": {"keys": keys}}))
 
     def test_a_schema_is_a_positive_integer(self) -> None:
         for bad in ("1", True, 0, 1.0, None):
@@ -127,6 +144,23 @@ class Checks(unittest.TestCase):
         self.assertEqual(found({"inputs": {}, "debian_snapshot": "20261121T005332Z"}), "")
         self.assertIn("inputs must be an object", found({"inputs": []}))
         self.assertIn("JSON object", found([]))
+
+    def test_snapshots_per_archive(self) -> None:
+        def says(snapshots: object, **more: object) -> str:
+            return found({"schema": 3, "debian_snapshots": snapshots, "inputs": {}, **more})
+
+        good = {"debian": "20261123T084014Z", "debian-security": "20261123T141315Z"}
+        self.assertEqual(says(good), "")
+        self.assertIn("keep one of them", says(good, debian_snapshot="20261123T084014Z"))
+        bad: object
+        for bad in ({}, [], "20261123T084014Z", None):
+            self.assertIn("must be an object", says(bad), str(bad))
+        self.assertIn("not a snapshot.debian.org ID", says({"debian": "latest"}))
+        self.assertIn("not a snapshot.debian.org ID", says({"debian": None}))
+        self.assertIn("not an archive name", says({"Debian/x": "20261123T084014Z"}))
+        taken = self.entry(**{"debian_security": "mine"})
+        clash = found({"schema": 3, "debian_snapshots": good, "inputs": {"debian-snapshot": taken}})
+        self.assertIn("LOCK_DEBIAN_SNAPSHOT_DEBIAN_SECURITY in build.env would also be the Debian snapshot's", clash)
 
     def test_each_check_catches_what_it_is_for(self) -> None:
         cases = {
@@ -345,6 +379,18 @@ class BuildEnv(unittest.TestCase):
         lock["debian_snapshot"] = "20261121T005332Z"
         self.assertIn(("LOCK_DEBIAN_SNAPSHOT", "20261121T005332Z"), build_env(lock))
         self.assertEqual(env_name("android-system-image-34"), "LOCK_ANDROID_SYSTEM_IMAGE_34")
+
+    def test_one_snapshot_per_archive_is_exported_by_archive(self) -> None:
+        lock = copy.deepcopy(example())
+        lock["debian_snapshots"] = {"debian-security": "20261123T141315Z", "debian": "20261123T084014Z"}
+        self.assertEqual(
+            build_env(lock)[:2],
+            [
+                ("LOCK_DEBIAN_SNAPSHOT_DEBIAN", "20261123T084014Z"),
+                ("LOCK_DEBIAN_SNAPSHOT_DEBIAN_SECURITY", "20261123T141315Z"),
+            ],
+        )
+        self.assertEqual(build_env(lock, snapshot=False), build_env(lock)[2:])
 
     def test_the_snapshot_can_be_left_out(self) -> None:
         lock = copy.deepcopy(example())

@@ -62,13 +62,13 @@ regex manager and a three-line script are enough.
 **1. Install.** One file, any Python 3.13 or newer:
 
 ```sh
-curl -fsSLO https://github.com/foreverworks/input-lock/releases/download/v0.2.0/input-lock-0.2.0.pyz
-python3 input-lock-0.2.0.pyz --version
+curl -fsSLO https://github.com/foreverworks/input-lock/releases/download/v0.3.0/input-lock-0.3.0.pyz
+python3 input-lock-0.3.0.pyz --version
 ```
 
-or `pip install git+https://github.com/foreverworks/input-lock@v0.2.0`, which installs the
+or `pip install git+https://github.com/foreverworks/input-lock@v0.3.0`, which installs the
 `input-lock` command and the `input_lock` library. The commands below say `input-lock`; with the
-`.pyz`, run `python3 input-lock-0.2.0.pyz` in its place.
+`.pyz`, run `python3 input-lock-0.3.0.pyz` in its place.
 
 **2. Write a lock.** Save this as `lock.json` ([examples/lock.json](examples/lock.json)): jq and
 ShellCheck from their GitHub releases, and Grafana Alloy from Grafana's apt repository. It is
@@ -150,7 +150,7 @@ lock_fetch shellcheck /tmp/shellcheck.tar.xz
 
 ```json
 {
-  "extends": ["config:recommended", "github>foreverworks/input-lock#v0.2.0"]
+  "extends": ["config:recommended", "github>foreverworks/input-lock#v0.3.0"]
 }
 ```
 
@@ -221,7 +221,7 @@ the trust (`signed_by`, `sums_url`, `sums_sig_url`), with the URL rendered. So:
 It is a deny-list by design: a field the library does not know might change what a build makes,
 so it counts, and a forgotten field means one rebuild too many, never a stale artifact.
 `input-lock identity --image builder` prints it for the lock part alone, ready for a cache key
-(add `debian_snapshot` to the key yourself if the job installs from it).
+(add the Debian snapshot to the key yourself if the job installs from it).
 The full definition is in [docs/format.md](docs/format.md#the-input-identity).
 
 ## Signed checksums from the vendor
@@ -319,7 +319,7 @@ that changes it says so:
 | `problems(data, images=None)`, `entry_problems(name, entry, images=None)` | every problem of a lock, or of one entry, as a sentence, for your own checks to extend |
 | `render_url(entry)`, `placeholders(entry)`, `checksums(entry)`, `used_by(entry)` | what an entry says |
 | `build_fields(entry)`, `entries_for(lock, image)`, `entry_env(name, entry)`, `env_name(name)` | what a build reads |
-| `build_env(lock, image=None, snapshot=True)`, `shell(pairs)` | a build.env; `snapshot=False` leaves `LOCK_DEBIAN_SNAPSHOT` out, for an environment (a hook's) that must not see the build snapshot |
+| `build_env(lock, image=None, snapshot=True)`, `shell(pairs)` | a build.env; `snapshot=False` leaves the Debian snapshots out, for an environment (a hook's) that must not see the build snapshot |
 | `input_identity(...)`, `files_digest(files)`, `lock_digest(lock)`, `digest(value)`, `canonical(value)` | identities and digests |
 | `SNAPSHOT_ID` | the pattern of a snapshot.debian.org ID, for a field of your own that holds one |
 | `SCHEMA`, `IDENTITY`, `CHECKSUMS`, `HINTS`, `BOOKKEEPING`, `TRUST`, `NOT_BUILD_FIELDS` | the format's constants: the highest schema read, the identity's tag, and the field lists |
@@ -366,23 +366,27 @@ Every message names the entry or file it is about. These are the ones people mee
 | `the keyring <url> does not match its sha256 in the lock` | The vendor changed its key file. Read the new key, and if you trust it, put its checksum in the lock in the same change. |
 | `the signature does not verify: ...` | gpgv rejected the signature: a key not in the pinned keyring, an expired or revoked key, or text that was changed. The message ends with what gpgv said. |
 | `this lock is schema 2, and this release ... reads schema 1 only: upgrade input-lock to read it` | The lock uses signed checksums, which input-lock 0.1.0 cannot read. Use 0.2.0 or newer. |
+| `this lock is schema 3, and this release ... reads schema 2 only: upgrade input-lock to read it` | The lock pins Debian snapshots per archive (`debian_snapshots`). Use 0.3.0 or newer. |
 | `lock: <entry> (<url>) is not the file the lock pins` (from `lock_fetch`) | The download's checksum differs from the lock. The build stops, and the bad file is removed. |
 | `lock: LOCK_JQ_URL is not set (is build.env sourced...)` | Source `build.env` before `lock.sh`, and make sure the entry's `used_by` lists the image you passed to `env --image`. |
 
 `input-lock check` prints one line per problem in the lock itself, each after the file's name. Most then start
 with `inputs.<entry>`; a problem with the lock as a whole (an unknown top-level field, a bad
-`debian_snapshot`, the schema) names that field instead.
+`debian_snapshot` or `debian_snapshots`, the schema) names that field instead.
 [docs/format.md](docs/format.md) has the rule behind each.
 
 ## Status
 
-Version 0.2.0. It adds signed checksums (`signed_by`, `sums_url`, `sums_sig_url`), `env
---no-snapshot` and `build_env(..., snapshot=False)`, and makes `SNAPSHOT_ID`, `entry_problems`,
-`entry_env`, `TRUST` and `schema_needed` public. A lock that uses signed checksums is schema 2;
-every other lock stays schema 1. Both are meant to stay readable by every later release; a lock
-from a newer schema fails with a clear message instead of a guess. The names `signed_by`,
-`sums_url` and `sums_sig_url` now belong to the format: a field of your own by one of those names
-is read as this release defines it.
+Version 0.3.0. It adds `debian_snapshots`, one snapshot.debian.org ID per archive, for builds that
+take Debian's security archive on its own clock. Only a lock that uses it becomes schema 3; every
+other lock keeps its schema and its bytes. Every schema stays readable by every later release, and
+a lock from a newer schema fails with a clear message instead of a guess. An older release that
+meets a schema 3 lock says to upgrade.
+
+Version 0.2.0 added signed checksums (`signed_by`, `sums_url`, `sums_sig_url`), which make a lock
+schema 2, `env --no-snapshot` and `build_env(..., snapshot=False)`, and made `SNAPSHOT_ID`,
+`entry_problems`, `entry_env`, `TRUST` and `schema_needed` public.
+
 The library and commands may still change before 1.0, and the release notes on GitHub will say how.
 
 Known limits:
@@ -393,7 +397,7 @@ Known limits:
   has one), not as a proof. An apt entry's checksum comes from its vendor's `Packages` index, read
   over HTTPS and not checked against the vendor's key. Give the entry a `signed_by` where the
   vendor signs (above).
-- One entry pins one file for one architecture (several architectures per entry would be schema 3).
+- One entry pins one file for one architecture (several architectures per entry would be schema 4).
 - Every push runs the tests on the newest stable Python and checks types and lint against 3.13,
   the oldest supported (Debian 13's); every supported version runs weekly and before each release.
 

@@ -10,7 +10,7 @@ the provenance, SBOM and test-result records, `input_lock.deb` a vendor's apt re
 standard library only.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from .identity import IDENTITY, Package, canonical, digest, files_digest, input_identity, lock_digest
 from .lock import (

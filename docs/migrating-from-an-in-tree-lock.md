@@ -64,7 +64,8 @@ exporter are likely:
 - input-lock exports every field a build reads, not a fixed list: `module` when it is a string,
   and every field of your own. If your CI compares build.env before and after a push to decide
   what to rebuild, this adds lines once, so everything rebuilds once.
-- `LOCK_DEBIAN_SNAPSHOT` is exported only when the lock has a `debian_snapshot`.
+- `LOCK_DEBIAN_SNAPSHOT` is exported only when the lock has a `debian_snapshot`, and a
+  `LOCK_DEBIAN_SNAPSHOT_<ARCHIVE>` per archive only when it has `debian_snapshots`.
 
 Anything your builds need that is not a lock field (a list derived from several entries, say)
 stays in your own exporter, appended after input-lock's output.
@@ -103,7 +104,7 @@ In `renovate.json`, delete your `customType: "jsonata"` manager for the lock and
 
 ```json
 {
-  "extends": ["github>foreverworks/input-lock#v0.2.0"]
+  "extends": ["github>foreverworks/input-lock#v0.3.0"]
 }
 ```
 
@@ -131,9 +132,9 @@ The tool your build trusts with its downloads is a download too. Give it an entr
   "datasource": "github-releases",
   "depName": "foreverworks/input-lock",
   "extractVersion": "^v(?<version>.+)$",
-  "sha256": "<sha256 of input-lock-0.2.0.pyz>",
+  "sha256": "<sha256 of input-lock-0.3.0.pyz>",
   "url": "https://github.com/foreverworks/input-lock/releases/download/v{version}/input-lock-{version}.pyz",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }
 ```
 

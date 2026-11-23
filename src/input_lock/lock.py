@@ -3,8 +3,10 @@
 A lock is a JSON object:
 
     {
-      "schema": 1,                          optional; a lock without it is schema 1; 2 when it uses TRUST
+      "schema": 1,                          optional; a lock without it is schema 1; `schema_needed` says
+                                            which one a lock needs
       "debian_snapshot": "20261121T005332Z" optional; a snapshot.debian.org ID for Debian builds
+      "debian_snapshots": {"debian": "..."} or instead of it, one ID per archive (schema 3)
       "inputs": { "<name>": <entry>, ... }  one entry per downloaded file
     }
 
@@ -38,6 +40,7 @@ class Lock(TypedDict):
 
     schema: NotRequired[int]
     debian_snapshot: NotRequired[str]
+    debian_snapshots: NotRequired[dict[str, str]]
     inputs: dict[str, dict[str, Value]]
 
 
@@ -45,10 +48,11 @@ class LockError(ValueError):
     """The lock is not one this library can read: its message names every problem, one per line."""
 
 
-SCHEMA: Final = 2
-"""The highest schema this library reads. A lock is schema 1 unless it uses a TRUST field, which needs
-schema 2: input-lock 0.1.0 reads schema 1 only, so it refuses such a lock instead of reading its
-signature fields as plain fields and checking nothing. A lock with a higher schema needs a newer release."""
+SCHEMA: Final = 3
+"""The highest schema this library reads. A lock is schema 1 unless it uses something an older release
+would misread: a TRUST field needs schema 2 (input-lock 0.1.0 would read it as a plain field and check
+no signature), `debian_snapshots` needs schema 3 (input-lock 0.2.0 does not know it). An older release
+refuses such a lock and says to upgrade. A lock with a higher schema needs a newer release."""
 
 CHECKSUMS: Final[Mapping[str, int]] = {"sha256": 64, "sha512": 128, "sha1": 40}
 """Every checksum an entry may carry, and its length in hex digits."""
@@ -69,7 +73,7 @@ NOT_BUILD_FIELDS: Final = frozenset((*HINTS, *BOOKKEEPING, *TRUST))
 DERIVED: Final = ("version_noepoch", "version_underscore", "version_urlquoted", "major")
 """Placeholders a url template may use that the version derives; no entry may define them."""
 
-TOP_LEVEL: Final = ("schema", "debian_snapshot", "inputs")
+TOP_LEVEL: Final = ("schema", "debian_snapshot", "debian_snapshots", "inputs")
 STRING_FIELDS: Final = frozenset(("version", "url", "apt", "description", *HINTS, *CHECKSUMS, *TRUST))
 TEMPLATES: Final = ("url", "sums_url", "sums_sig_url")
 """The fields that are url templates: rendered from the entry's placeholders, https only."""
@@ -77,7 +81,8 @@ NAME: Final = re.compile(r"[a-z0-9][a-z0-9-]*")
 FIELD: Final = re.compile(r"[a-z][a-z0-9_]*")
 PLACEHOLDER: Final = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 SNAPSHOT_ID: Final = re.compile(r"\d{8}T\d{6}Z")
-"""A snapshot.debian.org ID, YYYYMMDDTHHMMSSZ: what `debian_snapshot` holds. Match it with `fullmatch`."""
+"""A snapshot.debian.org ID, YYYYMMDDTHHMMSSZ: what `debian_snapshot` holds, and each value of
+`debian_snapshots`. Match it with `fullmatch`."""
 URL_SCHEMES: tuple[str, ...] = ("https://",)
 """The schemes a url may use. Tests widen it to file:// for offline downloads."""
 
@@ -124,7 +129,10 @@ def dump(lock: object) -> str:
 
 
 def schema_needed(data: JsonValue) -> int:
-    """The lowest schema that can hold `data`: 2 when an entry uses a TRUST field, else 1."""
+    """The lowest schema that can hold `data`: 3 with `debian_snapshots`, 2 when an entry uses a TRUST
+    field, else 1."""
+    if isinstance(data, dict) and "debian_snapshots" in data:
+        return 3
     inputs = data.get("inputs") if isinstance(data, dict) else None
     if isinstance(inputs, dict) and any(
         isinstance(entry, dict) and any(field in entry for field in TRUST) for entry in inputs.values()
@@ -134,15 +142,16 @@ def schema_needed(data: JsonValue) -> int:
 
 
 def with_schema(lock: object) -> object:
-    """The lock with `"schema": 2` when it needs it, and a 2 it no longer needs lowered to 1; else as it is.
+    """The lock with the schema it needs: 2 or 3 written when it needs one, a number it no longer needs
+    lowered; else as it is.
 
-    A lock without a schema field gains none unless it needs 2, so a schema-1 lock keeps its bytes."""
+    A lock without a schema field gains none unless it needs one, so a schema-1 lock keeps its bytes."""
     if not isinstance(lock, dict) or not isinstance(lock.get("inputs"), dict):
         return lock
     needed = schema_needed(cast(JsonValue, lock))
     if needed > 1:
         return {**lock, "schema": needed}
-    if lock.get("schema") == 2:
+    if lock.get("schema") in range(2, SCHEMA + 1):
         return {**lock, "schema": 1}
     return lock
 
@@ -154,7 +163,7 @@ def schema_of(data: Mapping[str, JsonValue]) -> int:
         raise LockError(f"schema must be a positive integer, not {schema!r}")
     if schema > SCHEMA:
         raise LockError(
-            f"this lock is schema {schema}, and this release of input-lock reads schema {SCHEMA} only: "
+            f"this lock is schema {schema}, and this release of input-lock reads schema {SCHEMA} at most: "
             "upgrade input-lock to read it"
         )
     return schema
@@ -263,15 +272,23 @@ def entry_env(name: str, entry: Entry) -> list[tuple[str, str]]:
     ]
 
 
-def build_env(lock: Lock, image: str | None = None, *, snapshot: bool = True) -> list[tuple[str, str]]:
-    """[(KEY, value)] for a build.env: the snapshot (when the lock has one), LOCK_ENTRIES, every entry's fields.
-
-    snapshot=False leaves LOCK_DEBIAN_SNAPSHOT out, for an environment that must not see the build
-    snapshot (a hook's, say), even when the lock has one."""
-    own = entries_for(lock, image)
+def snapshot_env(lock: Lock) -> list[tuple[str, str]]:
+    """LOCK_DEBIAN_SNAPSHOT for `debian_snapshot`, LOCK_DEBIAN_SNAPSHOT_<ARCHIVE> for each of `debian_snapshots`."""
     pairs: list[tuple[str, str]] = []
-    if snapshot and "debian_snapshot" in lock:
+    if "debian_snapshot" in lock:
         pairs.append(("LOCK_DEBIAN_SNAPSHOT", lock["debian_snapshot"]))
+    for archive, snapshot_id in sorted(lock.get("debian_snapshots", {}).items()):
+        pairs.append((f"LOCK_DEBIAN_SNAPSHOT_{archive.upper().replace('-', '_')}", snapshot_id))
+    return pairs
+
+
+def build_env(lock: Lock, image: str | None = None, *, snapshot: bool = True) -> list[tuple[str, str]]:
+    """[(KEY, value)] for a build.env: the snapshots (when the lock has any), LOCK_ENTRIES, every entry's fields.
+
+    snapshot=False leaves LOCK_DEBIAN_SNAPSHOT and the LOCK_DEBIAN_SNAPSHOT_<ARCHIVE> lines out, for an
+    environment that must not see the build snapshot (a hook's, say), even when the lock has one."""
+    own = entries_for(lock, image)
+    pairs = snapshot_env(lock) if snapshot else []
     pairs.append(("LOCK_ENTRIES", " ".join(own)))
     for name, entry in own.items():
         pairs.extend(entry_env(name, entry))
@@ -297,17 +314,19 @@ def problems(data: JsonValue, images: Iterable[str] | None = None) -> list[str]:
     except LockError as error:
         return [str(error)]
     found: list[str] = []
-    if schema_needed(data) > schema:
+    needed = schema_needed(data)
+    if needed > schema:
         found.append(
-            f'the lock uses {", ".join(TRUST)}, which need "schema": 2, so that input-lock 0.1.0 refuses it '
+            'the lock uses debian_snapshots, which needs "schema": 3, so that a release that does not know it '
+            "says to upgrade: run input-lock format"
+            if needed == 3
+            else f'the lock uses {", ".join(TRUST)}, which need "schema": 2, so that input-lock 0.1.0 refuses it '
             "instead of checking no signature: run input-lock format"
         )
     unknown = sorted(set(data) - set(TOP_LEVEL))
     if unknown:
         found.append(f"unknown top-level fields {unknown}: a lock holds {list(TOP_LEVEL)}")
-    snapshot = data.get("debian_snapshot")
-    if "debian_snapshot" in data and not (isinstance(snapshot, str) and SNAPSHOT_ID.fullmatch(snapshot)):
-        found.append(f"debian_snapshot {snapshot!r} is not a snapshot.debian.org ID (YYYYMMDDTHHMMSSZ)")
+    found.extend(snapshot_shape_problems(data))
     inputs = data.get("inputs")
     if not isinstance(inputs, dict):
         return [*found, "inputs must be an object, one entry per downloaded file"]
@@ -319,7 +338,53 @@ def problems(data: JsonValue, images: Iterable[str] | None = None) -> list[str]:
         if not mistakes:
             good[name] = cast(Entry, entry)
     found.extend(across_entries(good))
+    found.extend(snapshot_env_problems(data, good))
     found.extend(keyring_problems(good, frozenset(inputs)))
+    return found
+
+
+def snapshot_shape_problems(data: Mapping[str, JsonValue]) -> list[str]:
+    """`debian_snapshot` is one ID, `debian_snapshots` one per archive, and a lock has at most one of the two."""
+    found: list[str] = []
+    snapshot = data.get("debian_snapshot")
+    if "debian_snapshot" in data and not (isinstance(snapshot, str) and SNAPSHOT_ID.fullmatch(snapshot)):
+        found.append(f"debian_snapshot {snapshot!r} is not a snapshot.debian.org ID (YYYYMMDDTHHMMSSZ)")
+    if "debian_snapshots" in data:
+        found.extend(snapshots_problems(data["debian_snapshots"]))
+        if "debian_snapshot" in data:
+            found.append("debian_snapshot and debian_snapshots are two ways to say one thing: keep one of them")
+    return found
+
+
+def snapshots_problems(value: JsonValue) -> list[str]:
+    """`debian_snapshots` names at least one archive, each with the ID of one of its snapshots."""
+    if not isinstance(value, dict) or not value:
+        return ["debian_snapshots must be an object of archive name to snapshot ID, with at least one archive"]
+    found: list[str] = []
+    for archive, snapshot_id in value.items():
+        if not NAME.fullmatch(archive):
+            found.append(f"debian_snapshots: {archive!r} is not an archive name (lowercase letters, digits, dashes)")
+        if not (isinstance(snapshot_id, str) and SNAPSHOT_ID.fullmatch(snapshot_id)):
+            found.append(
+                f"debian_snapshots.{archive} {snapshot_id!r} is not a snapshot.debian.org ID (YYYYMMDDTHHMMSSZ)"
+            )
+    return found
+
+
+def snapshot_env_problems(data: Mapping[str, JsonValue], entries: Mapping[str, Entry]) -> list[str]:
+    """No entry's build.env name is one that `debian_snapshots` uses."""
+    if "debian_snapshots" not in data or snapshot_shape_problems(data):
+        return []
+    taken = {key for key, _ in snapshot_env(cast(Lock, data))}
+    found: list[str] = []
+    for name, entry in sorted(entries.items()):
+        try:
+            pairs = entry_env(name, entry)
+        except ValueError:
+            continue  # its url already has a problem of its own
+        found.extend(
+            f"inputs.{name}: {key} in build.env would also be the Debian snapshot's" for key, _ in pairs if key in taken
+        )
     return found
 
 

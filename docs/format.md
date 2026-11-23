@@ -1,4 +1,4 @@
-# The lock format, schemas 1 and 2
+# The lock format, schemas 1 to 3
 
 This is the reference for `lock.json`: every field, every rule `input-lock check` enforces, what a
 build reads from it, and how the input identity is computed. The README has the tour.
@@ -32,8 +32,9 @@ checksums changes checksums and nothing else.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `schema` | no | The format's version: `2` when an entry uses `signed_by`, `sums_url` or `sums_sig_url` (required then), else `1`. A lock without it is read as schema 1, so an existing lock needs no edit. `format` writes the schema the lock needs. A lock with a higher number than a release reads fails with "upgrade input-lock to read it", never with a guess. |
+| `schema` | no | The format's version: `3` with `debian_snapshots`, `2` when an entry uses `signed_by`, `sums_url` or `sums_sig_url` (each required then), else `1`. A lock without it is read as schema 1, so an existing lock needs no edit. `format` writes the schema the lock needs. A lock with a higher number than a release reads fails with "upgrade input-lock to read it", never with a guess. |
 | `debian_snapshot` | no | A [snapshot.debian.org](https://snapshot.debian.org) ID (`YYYYMMDDTHHMMSSZ`) for builds that install Debian packages from a fixed point in time. Exported as `LOCK_DEBIAN_SNAPSHOT`. |
+| `debian_snapshots` | no | Instead of `debian_snapshot`: one snapshot ID per archive, for example `{"debian": "20261123T084014Z", "debian-security": "20261123T141315Z"}`, so each archive moves on its own clock. Schema 3. Exported as `LOCK_DEBIAN_SNAPSHOT_<ARCHIVE>` (`LOCK_DEBIAN_SNAPSHOT_DEBIAN_SECURITY`). A lock has one of the two fields, never both. |
 | `inputs` | yes | One entry per downloaded file, keyed by its name: lowercase letters, digits and dashes. |
 
 Any other top-level field is an error, so a typo never passes silently, and so is a key that
@@ -180,7 +181,7 @@ LOCK_JQ_VERSION=1.8.2
 ```
 
 `LOCK_<ENTRY>` is the name upper-cased with dashes as underscores; `<FIELD>` is the field
-upper-cased. `LOCK_DEBIAN_SNAPSHOT` comes first when the lock has one, unless `env --no-snapshot`
+upper-cased. `LOCK_DEBIAN_SNAPSHOT` (or a `LOCK_DEBIAN_SNAPSHOT_<ARCHIVE>` per archive) comes first when the lock has one, unless `env --no-snapshot`
 (`build_env(..., snapshot=False)`) leaves it out, for an environment that must not see it. `input-lock sh` prints
 `lock.sh`, the helpers a build sources after build.env:
 
@@ -204,7 +205,7 @@ input_identity(packages, entries, recipe_digest, parent_identity) = sha256(canon
 
 Canonical JSON is sorted keys, no whitespace, UTF-8. `input-lock identity [--image <name>]`
 prints it for lock entries alone (no packages, recipe or parent): a cache key that moves exactly
-when a download a job uses moves. It leaves `debian_snapshot` out, as the full identity does (a
+when a download a job uses moves. It leaves `debian_snapshot` and `debian_snapshots` out, as the full identity does (a
 new snapshot that changes no installed package rebuilds nothing); a job that installs from the
 snapshot without listing its packages should add the snapshot to its cache key itself.
 
@@ -237,9 +238,10 @@ raises the schema number. A new optional field that older readers can safely ref
 |---|---|---|
 | 1 | 0.1.0 | the format |
 | 2 | 0.2.0 | `signed_by`, `sums_url`, `sums_sig_url`. Required only by a lock that uses them, so 0.1.0 refuses that lock instead of checking no signature; a lock without them stays 1. |
+| 3 | 0.3.0 | `debian_snapshots`. Required only by a lock that uses it; every other lock keeps its schema. |
 
 The next known candidate is several architectures per entry (an `{arch}` placeholder and
-checksums per architecture), which would be schema 3.
+checksums per architecture), which would be schema 4.
 
 ## The library
 
@@ -250,12 +252,12 @@ Everything above is a function in `input_lock`, typed and standard library only:
 | `parse(text, images=None) -> Lock` | load and check; raises `LockError` naming every problem |
 | `problems(data, images=None) -> list[str]` | every problem as a sentence, for your own checks to extend |
 | `entry_problems(name, entry, images=None) -> list[str]` | the same for one entry, alone (no rule between entries) |
-| `SNAPSHOT_ID` | the pattern a `debian_snapshot` matches (`SNAPSHOT_ID.fullmatch(text)`) |
+| `SNAPSHOT_ID` | the pattern a snapshot ID matches (`SNAPSHOT_ID.fullmatch(text)`) |
 | `dump(lock) -> str` | the file's own form, with the schema the lock needs |
-| `schema_needed(data) -> int` | 2 when an entry uses a signature field, else 1 |
+| `schema_needed(data) -> int` | 3 with `debian_snapshots`, 2 when an entry uses a signature field, else 1 |
 | `render_url(entry)`, `placeholders(entry)`, `checksums(entry)`, `used_by(entry)` | what an entry says |
 | `build_fields(entry)`, `entries_for(lock, image)`, `entry_env(name, entry)`, `shell(pairs)` | what a build reads |
-| `build_env(lock, image=None, snapshot=True)` | a build.env's pairs; `snapshot=False` leaves `LOCK_DEBIAN_SNAPSHOT` out |
+| `build_env(lock, image=None, snapshot=True)` | a build.env's pairs; `snapshot=False` leaves the Debian snapshots out |
 | `input_identity(...)`, `files_digest(files)`, `lock_digest(lock)`, `digest(value)`, `canonical(value)` | identities and digests |
 | `input_lock.records` | in-toto statements, SLSA provenance v1, SPDX 2.3, test results, DSSE envelopes |
 | `input_lock.deb`, `input_lock.fetch`, `input_lock.refresh` | a vendor's index, the network, and the refresh plan |

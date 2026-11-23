@@ -227,14 +227,16 @@ def parser() -> argparse.ArgumentParser:
     env = command("env", "print a build.env: LOCK_<ENTRY>_<FIELD>=value for every field a build reads")
     env.add_argument("--image", help="only the entries whose used_by lists this image")
     env.add_argument(
-        "--no-snapshot", action="store_true", help="leave LOCK_DEBIAN_SNAPSHOT out, even when the lock has one"
+        "--no-snapshot",
+        action="store_true",
+        help="leave LOCK_DEBIAN_SNAPSHOT (and its per-archive forms) out, even when the lock has one",
     )
     env.set_defaults(run=cmd_env)
 
     identity = command(
         "identity",
         "print the input identity of lock entries alone (all, an image's, or named): no packages, no "
-        "debian_snapshot; add those to a cache key yourself when the job installs from the snapshot",
+        "Debian snapshots; add those to a cache key yourself when the job installs from the snapshot",
     )
     which = identity.add_mutually_exclusive_group()
     which.add_argument("--image", help="the entries whose used_by lists this image")

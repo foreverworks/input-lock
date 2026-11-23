@@ -73,6 +73,8 @@ def apply(
         new["schema"] = lock["schema"]
     if "debian_snapshot" in lock:
         new["debian_snapshot"] = lock["debian_snapshot"]
+    if "debian_snapshots" in lock:
+        new["debian_snapshots"] = lock["debian_snapshots"]
     return new, changes
 
 

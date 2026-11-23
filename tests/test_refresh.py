@@ -45,6 +45,15 @@ class Refresh(Workspace):
         self.assertEqual((code, out), (0, ""), "a second run rewrote again")
         self.assertIn("already right", err)
 
+    def test_the_snapshots_per_archive_are_kept(self) -> None:
+        snapshots = {"debian": "20261123T084014Z", "debian-security": "20261123T141315Z"}
+        lock = json.loads(self.lock_path.read_text())
+        self.lock_path.write_text(dump({**lock, "debian_snapshots": snapshots, "schema": 3}))
+        self.bump(tool="1.1.0")
+        code, _, err = self.cli("refresh", "--entry", "tool")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(self.lock_path.read_text())["debian_snapshots"], snapshots)
+
     def test_a_version_the_index_lacks_fails_and_writes_nothing(self) -> None:
         self.git("checkout", "-qb", "renovate/pkg")
         self.bump(tool="1.1.0", pkg="9.9.9")

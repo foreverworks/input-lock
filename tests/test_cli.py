@@ -69,7 +69,7 @@ class Cli(unittest.TestCase):
         self.assertEqual(run("identity", "--image", "builder", "--entry", "jq", "--lock", EXAMPLE).returncode, 2)
 
     def test_a_future_schema(self) -> None:
-        done = run("check", "--lock", "-", stdin='{"schema": 3, "inputs": {}}')
+        done = run("check", "--lock", "-", stdin='{"schema": 4, "inputs": {}}')
         self.assertEqual(done.returncode, 1)
         self.assertIn("upgrade input-lock", done.stderr)
 
