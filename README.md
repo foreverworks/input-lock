@@ -174,7 +174,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0        # the Action compares the branch with its merge base
-      - uses: foreverworks/input-lock@d2234a6d93e4e5dcf7b5472335e6acc4c2ac9777 # v0.2.0
+      - uses: foreverworks/input-lock@6cf5b96d9e351f8f6d89413ad1914f0a7bc259a6 # v0.3.0
 ```
 
 A few minutes after Renovate's push, a second commit on the branch carries the new checksums,
