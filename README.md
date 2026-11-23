@@ -13,7 +13,7 @@ package manager pins for them.
 You need Python 3.13 or newer to run it, and nothing to install beyond that: it uses only the standard
 library, and it is free (MIT). The download helpers in `lock.sh` need bash, curl and coreutils. The
 Action and the Renovate preset need a GitHub repository with Renovate. Checking a vendor's signature
-(see "Signed checksums") also needs `gpgv`.
+(see [Signed checksums from the vendor](#signed-checksums-from-the-vendor)) also needs `gpgv`.
 
 ## The problem
 
@@ -369,7 +369,9 @@ Every message names the entry or file it is about. These are the ones people mee
 | `lock: <entry> (<url>) is not the file the lock pins` (from `lock_fetch`) | The download's checksum differs from the lock. The build stops, and the bad file is removed. |
 | `lock: LOCK_JQ_URL is not set (is build.env sourced...)` | Source `build.env` before `lock.sh`, and make sure the entry's `used_by` lists the image you passed to `env --image`. |
 
-`input-lock check` prints one line per problem in the lock itself, each starting `inputs.<entry>`;
+`input-lock check` prints one line per problem in the lock itself, each after the file's name. Most then start
+with `inputs.<entry>`; a problem with the lock as a whole (an unknown top-level field, a bad
+`debian_snapshot`, the schema) names that field instead.
 [docs/format.md](docs/format.md) has the rule behind each.
 
 ## Status
